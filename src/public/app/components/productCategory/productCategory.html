@@ -1,0 +1,9 @@
+<div class="input-group col-sm-10 col-xs-12 offset-sm-1">
+    <label for="category" class="input-group-addon"><span>Category</span></label>
+    <select id="category" name="category" ng-init="category = categories[0]" ng-model="category" ng-options="category for category  in categories" class="form-control"></select>
+    <span class="input-group-addon checker">
+        <span>
+            <i class="fa fa-info-circle" aria-hidden="true" title="Please select category" ></i>
+        </span>
+    </span>
+</div>

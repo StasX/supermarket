@@ -1,0 +1,27 @@
+<top-container class="container-fluid"></top-container>
+<signup-step></signup-step>
+<div class=" col-md-6 col-sm-4 col-sm-offset-4 col-md-offset-3 col-xs-6 col-xs-offset-3">
+    <ng-form name="form" class="container col-sm-12 col-xs-12">
+        <div class="col-sm-offset-1 col-xs-offset-1 col-sm-10 col-xs-10" ng-show="alert">
+            <div  class="row alert alert-danger">
+                <p> One ore more fields are empty or wrong!</p>
+                <p> Please recheck and try again.</p>
+            </div>
+        </div>
+        <div class= "row">
+            <id-number class="input-group col-sm-offset-1 col-xs-offset-1 col-sm-10  col-xs-10"></id-number>
+        </div>
+        <div class= "row">
+            <e-mail class="input-group col-sm-offset-1 col-xs-offset-1 col-sm-10 col-xs-10"></email>
+        </div>
+        <div class= "row">
+            <a-pass class="input-group col-sm-offset-1 col-xs-offset-1 col-sm-10 col-xs-10"></a-pass>
+        </div>
+        <div class= "row">
+            <pass-confirm class="input-group col-sm-offset-1 col-xs-offset-1 col-sm-10 col-xs-10"></pass-confirm> 
+        </div>
+        <div class="row">
+            <b ng-click="continue()">Continue <i class="fa fa-arrow-right" aria-hidden="true"></i></b>
+        </div>
+    </ng-form>
+</div>

@@ -1,0 +1,10 @@
+{ "_id" : { "$oid" : "5ab149e839916338acf38211" }, "name" : "EDAM", "category" : "Milk & Eggs", "price" : 5.25, "image" : "http://www.eatwisconsincheese.com/images/cheese/Edam-h.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab1686c0a7bcd1ea818511b" }, "name" : "MASCARPONE", "category" : "Milk & Eggs", "price" : 3.49, "image" : "http://www.eatwisconsincheese.com/images/cheese/Mascarpone-h.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab16b890a7bcd1ea818511c" }, "name" : "Ce", "category" : "Milk & Eggs", "price" : 3.52, "image" : "http://www.eatwisconsincheese.com/images/cheese/Ricotta-h.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab182364ec864077c65093d" }, "name" : "CHEDDAR", "category" : "Milk & Eggs", "price" : 5.99, "image" : "http://www.eatwisconsincheese.com/images/cheese/Cheddar-h.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab183cd4ec864077c65093e" }, "name" : "Emmentaler", "category" : "Milk & Eggs", "price" : 4.28, "image" : "http://www.eatwisconsincheese.com/images/cheese/Emmentaler-h.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab186dc4ec864077c65093f" }, "name" : "FETA", "category" : "Milk & Eggs", "price" : 3.99, "image" : "http://www.eatwisconsincheese.com/images/cheese/Feta-h.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab191684ec864077c650940" }, "name" : "red apple", "category" : "Vegetables & Fruits", "price" : 0.69, "image" : "https://www.organicfacts.net/wp-content/uploads/2013/05/Apple4.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab532ce590b8c1dc8ab0b32" }, "name" : "Steak", "category" : "Meet & Fish", "price" : 9.99, "image" : "https://www.mrmeatmarkets.ca/wp-content/uploads/2017/02/AAA-Boneless-Rib-Eye-Steak-740x536.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab53bb08f28802fb0f12f0a" }, "name" : "Apple juice", "category" : "Wine & Drinks", "price" : 1.64, "image" : "https://www.dollargeneral.com/media/catalog/product/cache/image/700x700/e9c3970ab036de70892d86c6d221abfe/g/e/gerber_apple_juice_-_32_oz.jpg", "__v" : 0 }
+{ "_id" : { "$oid" : "5ab53f268f28802fb0f12f0b" }, "name" : "fish", "category" : "Meet & Fish", "price" : 7.39, "image" : "http://www.lagostelevision.com/wp-content/uploads/2018/01/FISH-640x299.jpg", "__v" : 0 }
