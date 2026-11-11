@@ -1,0 +1,46 @@
+<div class="row">
+    <form name="form" ng-submit="save()" class="container-fluid">
+        <div class="row">
+            <div class="input-group col-sm-10 col-xs-12 col-sm-offset-1">
+                <label for="product-name" class="input-group-addon"><span>Name</span></label>
+                <input id="product-name" type="text" required="required"  name="product-name" ng-model="productName" ng-change="nameChange()" ng-blur="checkName()" productname-directive class="form-control" placeholder="Name" autocomplete="off" spellcheck="false" />
+                <span class="input-group-addon checker">
+                    <i class="{{nameClassName}}" aria-hidden="true"></i>
+                </span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="input-group col-sm-10 col-xs-12 col-sm-offset-1">
+                <label for="price" class="input-group-addon"><span>Price</span></label>
+                <input id="price" type="text" name="price" required="required" ng-model="price" ng-change="priceChange()" ng-blur="checkPrice()" price-directive class="form-control" placeholder="Price" autocomplete="off" spellcheck="false" />
+                <span class="input-group-addon checker">
+                    <i class="{{priceClassName}}" aria-hidden="true"></i>
+                </span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="input-group col-sm-10 col-xs-12 col-sm-offset-1">
+                <label  for="image" class="input-group-addon"><span>Image</span></label>
+                <input  id="image" type="url" name="image" required="required" ng-model="image" ng-change="imageChange()" ng-blur="checkImage()" image-directive class="form-control" placeholder="Image" autocomplete="off" spellcheck="false" />
+                <span class="input-group-addon checker">
+                    <i class="{{imageClassName}}" aria-hidden="true"></i>
+                </span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="input-group col-sm-10 col-xs-12 col-sm-offset-1">
+                <label for="category" class="input-group-addon"><span>Category</span></label>
+                <select id="category" name="category" ng-init="category = categories[0]" ng-model="selectedCategory" ng-change="categoryChange()" ng-options="category for category  in categories" class="form-control"></select>
+                <span class="input-group-addon checker">
+                    <span>
+                        <i class="fa fa-info-circle" aria-hidden="true" title="Please select category" ></i>
+                    </span>
+                </span>
+            </div>
+        </div>
+        <div class="row" ng-include="error"></div>
+        <div class="row">
+            <input type="submit" class="btn-md btn-blue" value="save" />
+        </div>
+    </form>
+</div>

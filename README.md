@@ -4,7 +4,7 @@ Database setup and API reference consolidated from [ReadMe.txt](ReadMe.txt) and 
 
 ## Database setup
 
-Create a database named `shop` and import the collections from the [Collections](Collections/) directory:
+Create a database named `shop` and import the collections from the [db/seeds](db/seeds/) directory:
 
 - `carts.json`
 - `orders.json`
@@ -20,25 +20,60 @@ The administrator credentials provided in `ReadMe.txt` are:
 | Username | `j.smith@example.com` |
 | Password | `sec907@Ad0` |
 
+## Project structure
+
+```text
+backend/
+  src/         Express application, routes, models, and middleware
+  tests/       Jest backend tests
+frontend/
+  src/         AngularJS application, views, static assets, and index.html
+  tests/       Frontend unit tests
+db/
+  Dockerfile   MongoDB image definition
+  01-import.sh Database initialization script
+  seeds/       Database seed collections
+```
+
+Package files and test configuration live at each project's root. The backend serves `frontend/src`, keeping API requests and session cookies on the same origin. Start the application from the project root with `npm start` after installing backend dependencies and setting up MongoDB. The default address is `http://localhost:3000`.
+
+## Docker
+
+Start MongoDB and the application from the project root:
+
+```sh
+docker compose up --build -d --wait
+```
+
+Open `http://localhost:3000`. The app image includes both backend and frontend sources. MongoDB is available only inside the Compose network. Its image imports the four `db/seeds/*.json` files into `shop` when the database volume is first initialized. Existing database volumes are preserved and are not reimported.
+
+Database data and the generated session-signing key are stored in named volumes. Stop the containers while retaining these volumes with `docker compose down`. View logs with `docker compose logs -f`.
+
+This local setup pins MongoDB 4.4.29 to support the legacy Mongoose driver. MongoDB 4.4 is an end-of-life release; upgrading the driver and database is needed before production use. New MongoDB releases removed the legacy wire operations used by older drivers ([MongoDB documentation](https://www.mongodb.com/docs/manual/legacy-opcodes/)).
+
+The backend accepts `MONGODB_URI` (defaults to `mongodb://localhost:27017/shop`), `PORT` (defaults to `3000`), and `JWT_KEY_PATH` (defaults to `backend/src/key.pem` when run directly). Compose sets these automatically and creates the signing key on first startup.
+
+Copy `.env.example` to `.env` in the repository root before starting Compose. Compose reads `PORT`, `MONGODB_URI`, `JWT_KEY_PATH`, and `MONGO_INITDB_DATABASE` using `${VARIABLE}` interpolation. The example values are configured for Docker; `PORT` controls both the published port and the application listener. Keep the database name as `shop` to match the seed import script.
+
+For local `npm start`, change `MONGODB_URI` to `mongodb://localhost:27017/shop` and `JWT_KEY_PATH` to the path of an existing local signing key (for example, `backend/src/key.pem`). The backend also loads the root `.env` automatically, regardless of the working directory, using Node.js 22 or newer. Existing environment variables take precedence; a missing `.env` is allowed. `.env` is ignored by Git and excluded from Docker images.
+
 ## Tests
 
 The unit tests require Node.js 22 or newer. Backend tests use Jest; frontend tests use Node's built-in test runner. No running server or MongoDB database is needed.
 
-Install dependencies from `src` before the first run. `--ignore-scripts` skips the legacy native dependency build scripts, which these unit tests do not need:
+Install backend dependencies from the project root before the first run. The frontend tests need no dependency installation. `--ignore-scripts` skips the legacy native dependency build scripts, which these unit tests do not need:
 
 ```sh
-cd src
-npm install --ignore-scripts
+npm --prefix backend install --ignore-scripts
 ```
 
 Run both backend and frontend tests from the project root:
 
 ```sh
-cd src
 npm test
 ```
 
-Run either suite separately from `src`:
+Run either suite separately from the project root:
 
 ```sh
 npm run test:backend
@@ -48,7 +83,7 @@ npm run test:frontend
 - Backend tests exercise product listing, category queries and validation failures, order/product counts, logout cookie clearing, and route permissions.
 - Frontend tests exercise AngularJS price/email/password confirmation validators, page titles, navigation permissions, session reconnect, and logout success/failure handling.
 
-Tests execute the existing application scripts with isolated dependencies. Database calls, Express router registration, and AngularJS registration are replaced with test doubles. These are unit tests; they do not verify live HTTP requests, MongoDB persistence, JWT authentication, AngularJS rendering, or full browser workflows. Application source files are unchanged.
+Tests execute the existing application scripts with isolated dependencies. Database calls, Express router registration, and AngularJS registration are replaced with test doubles. These are unit tests; they do not verify live HTTP requests, MongoDB persistence, JWT authentication, AngularJS rendering, or full browser workflows.
 
 ## API reference
 
