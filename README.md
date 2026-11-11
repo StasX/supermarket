@@ -24,18 +24,24 @@ The administrator credentials provided in `ReadMe.txt` are:
 
 ```text
 backend/
-  src/         Express application, routes, models, and middleware
-  tests/       Jest backend tests
+  src/         NestJS controllers, services, guard, module, and MongoDB models
+  tests/       Jest HTTP tests using NestJS and mocked MongoDB models
 frontend/
-  src/         AngularJS application, views, static assets, and index.html
-  tests/       Frontend unit tests
+  src/         Angular 22 standalone components, services, forms, routes, and unit tests
+  e2e/         Playwright browser tests
 db/
   Dockerfile   MongoDB image definition
   01-import.sh Database initialization script
   seeds/       Database seed collections
 ```
 
-Package files and test configuration live at each project's root. The backend serves `frontend/src`, keeping API requests and session cookies on the same origin. Start the application from the project root with `npm start` after installing backend dependencies and setting up MongoDB. The default address is `http://localhost:3000`.
+Use Node.js 22.22.3 (`.nvmrc`), also pinned in Docker and GitHub Actions. Angular 22 also supports Node.js 24.15+ or 26+, but Node.js 25 is unsupported. Install dependencies with `npm ci --prefix backend` and `npm ci --prefix frontend`, then run `npm start` after setting up MongoDB and a session signing key. Startup builds the Angular application into `frontend/dist/browser` and compiles NestJS into `backend/dist`. NestJS serves the built frontend and API at `http://localhost:3000`, keeping session cookies on the same origin.
+
+The frontend uses Angular 22, TypeScript 6, standalone components, reactive forms, signals, HttpClient, and role-based route guards. AngularJS, UI Router, jQuery, and their old templates have been removed. Hash routing keeps frontend URLs separate from API endpoints; old `#!/` bookmarks are normalized to `#/`. Product listing, category filtering, search, administrator add/edit, signup/login, session reconnect, and saved carts use the existing API. Cart state is restored from MongoDB rather than the old browser localStorage format. Checkout displays its unavailable state; no payment or order placement has been added.
+
+For frontend development, run the backend on port 3000 and `npm --prefix frontend start` in another terminal. Open `http://localhost:4200`; the Angular development server proxies API calls to NestJS. Change `frontend/proxy.conf.json` if the backend uses a different port. Run `npm run build` from the root to build both projects without starting them.
+
+The backend uses NestJS 11 with its Express HTTP adapter. Routing belongs to `ApiController`, authentication to `AuthService` and `SessionGuard`, and product/cart/order queries to `ShopService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. Existing API paths, including `/sign-up` and `/reconect`, and the `SESSIONID` cookie remain supported. Existing JWT sessions remain accepted; new tokens contain only the user ID and standard timestamps. Checkout is still unfinished.
 
 ## Docker
 
@@ -45,13 +51,13 @@ Start MongoDB and the application from the project root:
 docker compose up --build -d --wait
 ```
 
-Open `http://localhost:3000`. The app image includes both backend and frontend sources. MongoDB is available only inside the Compose network. Its image imports the four `db/seeds/*.json` files into `shop` when the database volume is first initialized. Existing database volumes are preserved and are not reimported.
+Open `http://localhost:3000`. The multi-stage app image compiles Angular and NestJS, then includes the built frontend and production backend dependencies. MongoDB is available only inside the Compose network. Its image imports the four `db/seeds/*.json` files into `shop` when the database volume is first initialized. Existing database volumes are preserved and are not reimported.
 
 Database data and the generated session-signing key are stored in named volumes. Stop the containers while retaining these volumes with `docker compose down`. View logs with `docker compose logs -f`.
 
-This local setup pins MongoDB 4.4.29 to support the legacy Mongoose driver. MongoDB 4.4 is an end-of-life release; upgrading the driver and database is needed before production use. New MongoDB releases removed the legacy wire operations used by older drivers ([MongoDB documentation](https://www.mongodb.com/docs/manual/legacy-opcodes/)).
+This local setup retains MongoDB 4.4.29 and existing data volumes. The backend now uses Mongoose 8 with promise-based queries. MongoDB 4.4 is an end-of-life release; upgrading the database remains separate work and requires planning for existing data volumes.
 
-The backend accepts `MONGODB_URI` (defaults to `mongodb://localhost:27017/shop`), `PORT` (defaults to `3000`), and `JWT_KEY_PATH` (defaults to `backend/src/key.pem` when run directly). Compose sets these automatically and creates the signing key on first startup.
+The backend accepts `MONGODB_URI` (defaults to `mongodb://localhost:27017/shop`), `PORT` (defaults to `3000`), and `JWT_KEY_PATH` (defaults to `backend/src/key.pem` when run directly). Compose sets these automatically and creates the signing key on first startup. For local startup, create a key once with `node -e "require('node:fs').writeFileSync('backend/src/key.pem', require('node:crypto').randomBytes(64).toString('hex'), {flag:'wx', mode:0o600})"`.
 
 Copy `.env.example` to `.env` in the repository root before starting Compose. Compose reads `PORT`, `MONGODB_URI`, `JWT_KEY_PATH`, and `MONGO_INITDB_DATABASE` using `${VARIABLE}` interpolation. The example values are configured for Docker; `PORT` controls both the published port and the application listener. Keep the database name as `shop` to match the seed import script.
 
@@ -59,12 +65,13 @@ For local `npm start`, change `MONGODB_URI` to `mongodb://localhost:27017/shop` 
 
 ## Tests
 
-The unit tests require Node.js 22 or newer. Backend tests use Jest; frontend tests use Node's built-in test runner. No running server or MongoDB database is needed.
+Tests require Node.js 22.22.3 or another Angular-supported version. Backend tests compile TypeScript, start a NestJS test application, and exercise HTTP endpoints with Jest and Supertest. Frontend tests use Angular TestBed, HttpTestingController, Vitest, and jsdom. No separately running server or MongoDB database is needed for these suites.
 
-Install backend dependencies from the project root before the first run. The frontend tests need no dependency installation. `--ignore-scripts` skips the legacy native dependency build scripts, which these unit tests do not need:
+Install both projects' dependencies from the root before the first run:
 
 ```sh
-npm --prefix backend install --ignore-scripts
+npm ci --prefix backend
+npm ci --prefix frontend
 ```
 
 Run both backend and frontend tests from the project root:
@@ -80,10 +87,12 @@ npm run test:backend
 npm run test:frontend
 ```
 
-- Backend tests exercise product listing, category queries and validation failures, order/product counts, logout cookie clearing, and route permissions.
-- Frontend tests exercise AngularJS price/email/password confirmation validators, page titles, navigation permissions, session reconnect, and logout success/failure handling.
+- Backend tests exercise static frontend serving, product listing/search/category queries, validation, counts, signup/password hashing, JWT login/reconnect, expired or malformed tokens, logout, role guards, product management, cart ownership, and order history.
+- Frontend tests exercise Angular price/email/password confirmation validators, page titles, navigation permissions, session reconnect, logout success/failure handling, API compatibility, cart persistence/totals, and rendered login/signup forms. These replace the old AngularJS directive tests; they are not identical tests.
 
-Tests execute the existing application scripts with isolated dependencies. Database calls, Express router registration, and AngularJS registration are replaced with test doubles. These are unit tests; they do not verify live HTTP requests, MongoDB persistence, JWT authentication, AngularJS rendering, or full browser workflows.
+Backend tests exercise real NestJS HTTP routing, guards, cookie handling, and JWT verification with injected MongoDB model doubles. They do not verify MongoDB persistence. Root `npm run test:backend` builds the Angular frontend first so static-serving tests have a production bundle. GitHub Actions installs both projects' dependencies and runs both suites on pushes and pull requests.
+
+With Docker Compose running and Google Chrome installed, run `npm --prefix frontend run test:e2e` for Playwright browser tests. Customer signup/cart operations use mocked API responses to avoid changing database records. The administrator smoke test uses the documented demo login against the running backend and reads products without editing them. Override `E2E_BASE_URL` if the app is not on port 3000. For Playwright's bundled browser, install Chromium with `npx --prefix frontend playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`. Browser tests are separate from the default CI unit/HTTP suites.
 
 ## API reference
 

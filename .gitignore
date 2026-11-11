@@ -1,4 +1,10 @@
 node_modules/
 coverage/
+backend/dist/
+frontend/dist/
+frontend/out-tsc/
+frontend/.angular/
+frontend/test-results/
+frontend/playwright-report/
 key.pem
 .env
