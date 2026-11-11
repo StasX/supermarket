@@ -1,0 +1,8 @@
+.git
+**/node_modules
+**/coverage
+**/tests
+**/key.pem
+**/.env
+.env
+*.log

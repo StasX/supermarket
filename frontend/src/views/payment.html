@@ -1,0 +1,25 @@
+<top-container class="container-fluid"></top-container>
+<h3 class="col-sm-12 col-xs-12 center">Order</h3>
+<h5 class="col-sm-12 col-xs-12 center">Shipping Details</h5>
+<hr  class="col-sm-9 col-xs-9" />
+<ng-form name="form" ng-submit="pay()">
+    <div class= "row">
+        <select-city class="input-group offset-sm-1 offset-xs-1 col-sm-10  col-xs-10"></select-city>
+    </div>
+    <div class= "row">
+        <a-street class="input-group offset-sm-1 offset-xs-1 col-sm-10  col-xs-10"></a-street>
+    </div>
+    <div class= "row">
+        <shipping-date class="input-group offset-sm-1 offset-xs-1 col-sm-10  col-xs-10"></shipping-date>
+    </div>
+    <h5 class="col-sm-12 col-xs-12 center">Payments:</h5>
+    <div class="row">
+        <hr class="col-sm-9 col-xs-9" />
+    </div>
+    <div class= "row">
+        <credit-card class="input-group offset-sm-1 offset-xs-1 col-sm-10  col-xs-10"></credit-card>
+    </div>
+    <div class="row">
+        <input type="submit" value="Order" class="btn btn-md btn-blue"/>
+    </div>
+</ng-form>
