@@ -60,6 +60,17 @@ test('serves the compiled Angular application', async () => {
   await api().get('/' + main[1]).expect(200);
 });
 
+test.each(['edam', 'mascarpone', 'ricotta', 'cheddar', 'emmentaler', 'feta', 'red-apple', 'steak', 'apple-juice', 'fish'])(
+  'serves the generated %s product image without authentication', async name => {
+    const response = await api().get(`/products/${name}.png`).expect(200).expect('Content-Type', /image\/png/);
+    expect(response.body.equals(fs.readFileSync(path.join(__dirname, '..', 'static', 'products', `${name}.png`)))).toBe(true);
+  },
+);
+
+test('missing product images return 404', async () => {
+  await api().get('/products/missing.png').expect(404);
+});
+
 test.each([undefined, 'invalid', jwt.sign({}, 'wrong-key'), jwt.sign({ sub: customer._id, exp: 1 }, key)])(
   'rejects missing, malformed, invalid-signature and expired sessions (%s)', async token => {
     const call = api().get('/get-all-products');

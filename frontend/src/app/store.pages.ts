@@ -82,7 +82,7 @@ export class StorePage implements OnInit {
         <label>Product name<input formControlName="name" required></label>
         <label>Category<select formControlName="category">@for (name of categories; track name) {<option [value]="name">{{ name }}</option>}</select></label>
         <label>Price<input formControlName="price" inputmode="decimal" placeholder="0.00" required></label>
-        <label>Image URL<input type="url" formControlName="image" required></label>
+        <label>Image URL<input type="text" formControlName="image" placeholder="/products/edam.png or https://..." required></label>
         <p class="hint">Enter a price with two decimal places, such as 10.00.</p>
         <div class="actions"><button type="submit" [disabled]="saving()">Save product</button><button type="button" class="secondary" (click)="reset()" [disabled]="saving()">New product</button></div>
       </form>
@@ -107,7 +107,7 @@ export class ManagementPage implements OnInit {
   readonly imageError = imageError;
   readonly form = inject(FormBuilder).nonNullable.group({
     name: ['', Validators.required], category: [categories[0]!, Validators.required], price: ['', [Validators.required, priceValidator]],
-    image: ['', [Validators.required, Validators.pattern(/^https?:\/\/.+/)]],
+    image: ['', [Validators.required, Validators.pattern(/^(https?:\/\/.+|\/products\/[a-z0-9-]+\.png)$/)]],
   });
   ngOnInit() { void this.load(); }
   async load() {

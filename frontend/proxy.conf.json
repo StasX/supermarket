@@ -1,4 +1,5 @@
 {
+  "/products/**": { "target": "http://localhost:3000" },
   "/login": { "target": "http://localhost:3000" }, "/sign-up": { "target": "http://localhost:3000" },
   "/logout": { "target": "http://localhost:3000" }, "/reconect": { "target": "http://localhost:3000" },
   "/get-*": { "target": "http://localhost:3000" }, "/total-*": { "target": "http://localhost:3000" },

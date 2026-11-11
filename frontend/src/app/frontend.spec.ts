@@ -12,6 +12,7 @@ import { CartService } from './cart.service';
 import { routes } from './app.routes';
 import { AppComponent } from './app.component';
 import { LoginPage, SignupPage } from './auth.pages';
+import { ManagementPage } from './store.pages';
 import { emailPattern, passwordsMatch, priceValidator } from './validators';
 
 const customer = { user: 'u1', name: 'John Smith', role: 0 };
@@ -125,6 +126,13 @@ describe('cart persistence', () => {
 });
 
 describe('Angular rendering and forms', () => {
+  it('allows administrators to edit products with server-hosted image URLs', () => {
+    const fixture = TestBed.createComponent(ManagementPage);
+    fixture.componentInstance.edit({ ...product, image: '/products/apple-juice.png' });
+    expect(fixture.componentInstance.form.valid).toBe(true);
+    fixture.componentInstance.form.controls.image.setValue('/products/../../private.png');
+    expect(fixture.componentInstance.form.controls.image.valid).toBe(false);
+  });
   it('renders the login form and rejects invalid input before HTTP', async () => {
     const fixture = TestBed.createComponent(LoginPage); fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('h1').textContent).toContain('Sign in');

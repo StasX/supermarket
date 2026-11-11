@@ -24,6 +24,7 @@ COPY --from=build /app/backend/node_modules ./node_modules
 COPY backend/package.json ./
 
 COPY --from=build /app/backend/dist ./dist
+COPY backend/static ./static
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 RUN mkdir -p /app/keys && chown node:node /app/keys
 

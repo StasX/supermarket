@@ -41,6 +41,8 @@ The frontend uses Angular 22, TypeScript 6, standalone components, reactive form
 
 For frontend development, run the backend on port 3000 and `npm --prefix frontend start` in another terminal. Open `http://localhost:4200`; the Angular development server proxies API calls to NestJS. Change `frontend/proxy.conf.json` if the backend uses a different port. Run `npm run build` from the root to build both projects without starting them.
 
+Product photos live in `backend/static/products` and are served publicly at `/products/<filename>.png`, including in Docker and through the frontend development proxy. The seed catalog uses these local URLs. Existing database volumes retain their product records; update each product's image URL through Product manager to switch an existing catalog to the local photos. The legacy product named `Ce` is depicted as ricotta, matching its original image.
+
 The backend uses NestJS 11 with its Express HTTP adapter. Routing belongs to `ApiController`, authentication to `AuthService` and `SessionGuard`, and product/cart/order queries to `ShopService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. Existing API paths, including `/sign-up` and `/reconect`, and the `SESSIONID` cookie remain supported. Existing JWT sessions remain accepted; new tokens contain only the user ID and standard timestamps. Checkout is still unfinished.
 
 ## Docker
