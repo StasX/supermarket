@@ -11,4 +11,7 @@ try {
     if (error.code !== 'EEXIST') throw error;
 }
 
-require('./app.js');
+require('./main.js').createApp().then(app => app.listen(process.env.PORT || 3000, '0.0.0.0')).catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

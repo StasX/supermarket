@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const bcrypt = require('bcrypt-nodejs');
+const bcrypt = require('bcryptjs');
 const Schema = mongoose.Schema;
 const User = new Schema({
     id : {
@@ -31,7 +31,3 @@ const User = new Schema({
     }
 });
 module.exports =  mongoose.model('users', User);
-module.exports.signup = (newUser, callback) => {
-    newUser.password = bcrypt.hashSync(newUser.password, bcrypt.genSaltSync(12));
-    newUser.save(callback);
-}

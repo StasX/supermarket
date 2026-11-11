@@ -25,9 +25,8 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      # Unit tests do not need the unused legacy native bcrypt build.
       - name: Install backend dependencies
-        run: npm ci --prefix backend --ignore-scripts --no-audit --no-fund
+        run: npm ci --prefix backend --no-audit --no-fund
 
       - name: Run existing tests
         run: npm test

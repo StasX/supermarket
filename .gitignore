@@ -1,4 +1,5 @@
 node_modules/
 coverage/
+backend/dist/
 key.pem
 .env
