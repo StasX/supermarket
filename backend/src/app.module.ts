@@ -9,7 +9,7 @@ import { SessionGuard } from './session.guard';
 
 @Module({
   imports: [DatabaseModule, ServeStaticModule.forRoot({
-    rootPath: join(__dirname, '..', '..', 'frontend', 'src'),
+    rootPath: join(__dirname, '..', '..', 'frontend', 'dist', 'browser'),
     serveStaticOptions: { fallthrough: true },
     renderPath: '/',
   })],

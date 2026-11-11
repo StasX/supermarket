@@ -52,10 +52,12 @@ afterAll(async () => {
   if (directory) { fs.unlinkSync(path.join(directory, 'session.key')); fs.rmdirSync(directory); }
 });
 
-test('serves the unchanged AngularJS application', async () => {
+test('serves the compiled Angular application', async () => {
   const response = await api().get('/').expect(200);
-  expect(response.text).toContain('ng-app');
-  await api().get('/app/app.js').expect(200);
+  expect(response.text).toContain('<app-root>');
+  const main = response.text.match(/src="([^"]*main[^\"]*\.js)"/);
+  expect(main).not.toBeNull();
+  await api().get('/' + main[1]).expect(200);
 });
 
 test.each([undefined, 'invalid', jwt.sign({}, 'wrong-key'), jwt.sign({ sub: customer._id, exp: 1 }, key)])(

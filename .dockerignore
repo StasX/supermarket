@@ -1,6 +1,11 @@
 .git
 **/node_modules
 **/coverage
+**/dist
+**/.angular
+**/out-tsc
+**/test-results
+**/playwright-report
 **/tests
 **/key.pem
 **/.env
