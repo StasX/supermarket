@@ -1,0 +1,33 @@
+name: Main
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Backend and frontend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # Unit tests do not need the unused legacy native bcrypt build.
+      - name: Install backend dependencies
+        run: npm ci --prefix backend --ignore-scripts --no-audit --no-fund
+
+      - name: Run existing tests
+        run: npm test
