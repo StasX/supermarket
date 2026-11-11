@@ -20,6 +20,36 @@ The administrator credentials provided in `ReadMe.txt` are:
 | Username | `j.smith@example.com` |
 | Password | `sec907@Ad0` |
 
+## Tests
+
+The unit tests require Node.js 22 or newer. Backend tests use Jest; frontend tests use Node's built-in test runner. No running server or MongoDB database is needed.
+
+Install dependencies from `src` before the first run. `--ignore-scripts` skips the legacy native dependency build scripts, which these unit tests do not need:
+
+```sh
+cd src
+npm install --ignore-scripts
+```
+
+Run both backend and frontend tests from the project root:
+
+```sh
+cd src
+npm test
+```
+
+Run either suite separately from `src`:
+
+```sh
+npm run test:backend
+npm run test:frontend
+```
+
+- Backend tests exercise product listing, category queries and validation failures, order/product counts, logout cookie clearing, and route permissions.
+- Frontend tests exercise AngularJS price/email/password confirmation validators, page titles, navigation permissions, session reconnect, and logout success/failure handling.
+
+Tests execute the existing application scripts with isolated dependencies. Database calls, Express router registration, and AngularJS registration are replaced with test doubles. These are unit tests; they do not verify live HTTP requests, MongoDB persistence, JWT authentication, AngularJS rendering, or full browser workflows. Application source files are unchanged.
+
 ## API reference
 
 The following endpoints and examples reproduce the API documented in `api.doc`, with formatting corrected for valid JSON. Paths and field names retain their original spelling, including `/reconect` and signup field `Id`. The source does not specify a base URL, status codes, error responses, or authentication requirements.
