@@ -1,4 +1,41 @@
 import { expect, test } from '@playwright/test';
+import path from 'node:path';
+
+test('administrator can upload a product image and retain it when editing', async ({ page }) => {
+  let uploadCount = 0;
+  let product = { id: 'p1', name: 'Edam', category: 'Milk & Eggs', price: 5.25, image: '/products/edam.png' };
+  await page.route('**/reconect', route => route.fulfill({ json: { success: true, role: 1, user: 'admin', name: 'Shop Admin' } }));
+  await page.route('**/get-all-products', route => route.fulfill({ json: { success: true, products: [product] } }));
+  await page.route('**/upload-product-image', async route => {
+    uploadCount++;
+    expect(route.request().headers()['content-type']).toContain('multipart/form-data');
+    expect(route.request().postDataBuffer()?.includes(Buffer.from('filename="edam.png"'))).toBe(true);
+    await route.fulfill({ json: { success: true, image: '/products/uploads/new.png' } });
+  });
+  for (const endpoint of ['add-product', 'edit-product']) {
+    await page.route(`**/${endpoint}`, async route => {
+      const body = route.request().postDataJSON();
+      expect(body.image).toBe('/products/uploads/new.png');
+      product = { ...product, ...body, price: Number(body.price) };
+      await route.fulfill({ json: { success: true } });
+    });
+  }
+  await page.goto('/#/management');
+  await page.getByLabel('Product name').fill('New cheese');
+  await page.getByLabel('Price', { exact: true }).fill('5.25');
+  await page.getByLabel('Product image', { exact: true }).setInputFiles(path.resolve(__dirname, '../../backend/static/products/edam.png'));
+  await expect(page.getByAltText('Product image preview')).toHaveAttribute('src', /^blob:/);
+  await expect(page.locator('.image-upload-control')).toContainText('edam.png');
+  await expect(page.locator('.image-upload-control img')).toBeVisible();
+  await page.getByRole('button', { name: 'Save product', exact: true }).click();
+  await expect(page.getByText('Product saved.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit New cheese' }).click();
+  await expect(page.getByLabel('Product image', { exact: true })).toHaveValue('');
+  await page.getByLabel('Price', { exact: true }).fill('6.00');
+  await page.getByRole('button', { name: 'Save product', exact: true }).click();
+  await expect(page.getByText('Product saved.', { exact: true })).toBeVisible();
+  expect(uploadCount).toBe(1);
+});
 
 // Serve real compiled Angular pages; mock customer API data to avoid changing the database.
 test('customer can shop, change quantities, reload, review, and sign out', async ({ page }) => {

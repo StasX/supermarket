@@ -390,3 +390,25 @@ table { width: 100%; border-collapse: collapse; font-size: .82rem; th, td { padd
 
 
 
+.image-upload-field { display: grid; gap: 9px; min-width: 0; }
+.image-upload-control {
+  position: relative;
+  min-width: 0;
+  border: 1px solid $input-line;
+  border-radius: 8px;
+  background: $input-background;
+  transition: border-color .18s ease, box-shadow .18s ease;
+  &:hover:not(.disabled) { border-color: $primary; }
+  &:focus-within { border-color: $focus; box-shadow: 0 0 0 3px $focus-ring; }
+  &.disabled { opacity: .5; }
+  input[type='file'] { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; opacity: 0; cursor: pointer; z-index: 1; &:disabled { cursor: wait; } }
+}
+.image-upload-content { display: flex; align-items: center; gap: 12px; padding: 12px 15px; min-width: 0; pointer-events: none;
+  img, .image-upload-placeholder { flex-shrink: 0; width: 64px; height: 64px; border: 1px solid $line; border-radius: 6px; background: $surface; }
+  img { object-fit: contain; }
+}
+.image-upload-placeholder { display: grid; place-items: center; color: $primary; font-size: 1.5rem; }
+.image-upload-description { display: grid; gap: 5px; min-width: 0; }
+.image-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: $ink; font-size: .8rem; }
+.image-upload-action { color: $primary; font-size: .72rem; font-weight: 600; }
+

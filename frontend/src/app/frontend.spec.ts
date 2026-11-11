@@ -33,6 +33,15 @@ describe('form validation', () => {
 });
 
 describe('API compatibility', () => {
+  it('uploads an image as multipart form data', async () => {
+    const file = new File(['image'], 'cheese.png', { type: 'image/png' });
+    const promise = TestBed.inject(ApiService).uploadProductImage(file);
+    const request = TestBed.inject(HttpTestingController).expectOne('/upload-product-image');
+    expect(request.request.body.get('image')).toBe(file);
+    expect(request.request.headers.has('Content-Type')).toBe(false);
+    request.flush({ success: true, image: '/products/uploads/test.png' });
+    expect((await promise).image).toBe('/products/uploads/test.png');
+  });
   it('normalizes category product ids and prices', async () => {
     const promise = TestBed.inject(ApiService).products('Wine & Drinks');
     const request = TestBed.inject(HttpTestingController).expectOne('/get-products-by-category');

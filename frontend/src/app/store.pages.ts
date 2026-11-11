@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { CurrencyPipe } from '@angular/common';
 import { FormsModule, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -82,7 +82,18 @@ export class StorePage implements OnInit {
         <label>Product name<input formControlName="name" required></label>
         <label>Category<select formControlName="category">@for (name of categories; track name) {<option [value]="name">{{ name }}</option>}</select></label>
         <label>Price<input formControlName="price" inputmode="decimal" placeholder="0.00" required></label>
-        <label>Image URL<input type="text" formControlName="image" placeholder="/products/edam.png or https://..." required></label>
+        <div class="image-upload-field">
+          <label for="product-image">Product image</label>
+          <div class="image-upload-control" [class.disabled]="saving()">
+            <input id="product-image" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="product-image-hint" (change)="selectImage($event)" [disabled]="saving()">
+            <div class="image-upload-content">
+              @if (preview() || form.controls.image.value) {<img [src]="preview() || form.controls.image.value" alt="Product image preview">}
+              @else {<span class="image-upload-placeholder" aria-hidden="true">+</span>}
+              <span class="image-upload-description"><span class="image-upload-name">{{ fileName() || (form.controls.image.value ? 'Current image' : 'No image selected') }}</span><span class="image-upload-action">{{ preview() || form.controls.image.value ? 'Change image' : 'Choose image' }}</span></span>
+            </div>
+          </div>
+        </div>
+        <p class="hint" id="product-image-hint">PNG, JPEG, or WebP, up to 5 MB.</p>
         <p class="hint">Enter a price with two decimal places, such as 10.00.</p>
         <div class="actions"><button type="submit" [disabled]="saving()">Save product</button><button type="button" class="secondary" (click)="reset()" [disabled]="saving()">New product</button></div>
       </form>
@@ -99,15 +110,16 @@ export class StorePage implements OnInit {
     </section></div>
   `,
 })
-export class ManagementPage implements OnInit {
+export class ManagementPage implements OnInit, OnDestroy {
   private readonly api = inject(ApiService); readonly categories = categories;
   readonly products = signal<Product[]>([]); readonly loading = signal(false); readonly saving = signal(false);
   readonly error = signal(''); readonly saved = signal(false);
+  readonly preview = signal(''); readonly fileName = signal(''); private selectedFile: File | null = null;
   search = ''; category = ''; editing = ''; private request = 0;
   readonly imageError = imageError;
   readonly form = inject(FormBuilder).nonNullable.group({
     name: ['', Validators.required], category: [categories[0]!, Validators.required], price: ['', [Validators.required, priceValidator]],
-    image: ['', [Validators.required, Validators.pattern(/^(https?:\/\/.+|\/products\/[a-z0-9-]+\.png)$/)]],
+    image: ['', Validators.pattern(/^(https?:\/\/.+|\/products\/(?:uploads\/)?[a-z0-9-]+\.(?:png|jpg|webp))$/)],
   });
   ngOnInit() { void this.load(); }
   async load() {
@@ -116,16 +128,32 @@ export class ManagementPage implements OnInit {
     catch (error) { this.error.set(message(error)); }
     finally { if (request === this.request) this.loading.set(false); }
   }
-  edit(product: Product) { this.editing = product.id; this.form.setValue({ name: product.name, category: product.category, price: product.price.toFixed(2), image: product.image }); this.saved.set(false); this.error.set(''); }
-  reset() { this.editing = ''; this.form.reset({ name: '', category: categories[0]!, price: '', image: '' }); this.saved.set(false); this.error.set(''); }
+  selectImage(event: Event) {
+    const input = event.target as HTMLInputElement; const file = input.files?.[0]; input.value = '';
+    if (!file) return;
+    this.error.set(''); this.saved.set(false);
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      this.error.set('Choose a PNG, JPEG, or WebP image up to 5 MB.'); return;
+    }
+    this.clearSelection(); this.selectedFile = file; this.fileName.set(file.name); this.preview.set(URL.createObjectURL(file));
+  }
+  private clearSelection() { if (this.preview()) URL.revokeObjectURL(this.preview()); this.preview.set(''); this.fileName.set(''); this.selectedFile = null; }
+  ngOnDestroy() { this.clearSelection(); }
+  edit(product: Product) { this.clearSelection(); this.editing = product.id; this.form.setValue({ name: product.name, category: product.category, price: product.price.toFixed(2), image: product.image }); this.saved.set(false); this.error.set(''); }
+  reset() { this.clearSelection(); this.editing = ''; this.form.reset({ name: '', category: categories[0]!, price: '', image: '' }); this.saved.set(false); this.error.set(''); }
   async save() {
     if (this.saving()) return;
-    if (this.form.invalid) { this.form.markAllAsTouched(); this.error.set('Check the product name, category, price, and image URL.'); return; }
+    if (this.form.invalid || (!this.selectedFile && !this.form.controls.image.value)) { this.form.markAllAsTouched(); this.error.set('Check the product name, category, price, and choose an image.'); return; }
     this.saving.set(true); this.error.set(''); this.saved.set(false);
     try {
+      if (this.selectedFile) {
+        const upload = await this.api.uploadProductImage(this.selectedFile);
+        if (!upload.success || !upload.image) throw new Error('Image was not uploaded. Please try again.');
+        this.form.controls.image.setValue(upload.image); this.clearSelection();
+      }
       const values = this.form.getRawValue();
       const result = await this.api.saveProduct({ ...values, price: Number(values.price), ...(this.editing ? { id: this.editing } : {}) });
-      if (!result.success) throw new Error('Product was not saved. Check for duplicate names or image URLs.');
+      if (!result.success) throw new Error('Product was not saved. Check for a duplicate product name.');
       this.reset(); this.saved.set(true); await this.load();
     } catch (error) { this.error.set(message(error)); }
     finally { this.saving.set(false); }
