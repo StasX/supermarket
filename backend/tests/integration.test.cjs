@@ -152,12 +152,12 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
     assert.equal((await create(customerCookie)).body.success, false);
     assert.equal(await Cart.countDocuments({}), 1);
     const product = await Product.findOne({});
-    const products = [{ id: String(product._id), quantity: 2 }];
+    const products = [{ id: String(product._id), count: 2, price: product.price }];
     assert.equal((await request('/update-cart', {
         method: 'POST', cookie: customerCookie, body: { products }
     })).body.success, false);
     assert.equal((await request('/update-cart', {
-        method: 'POST', cookie: customerCookie, body: { id: created.id, products }
+        method: 'POST', cookie: customerCookie, body: { id: created.id, products: [{ ...products[0], price: -100 }] }
     })).body.success, true);
     const cart = (await request('/get-cart', { cookie: customerCookie })).body.cart;
     assert.equal(cart.id, created.id);

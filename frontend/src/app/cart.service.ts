@@ -33,11 +33,14 @@ export class CartService {
     try {
       const id = this.id();
       if (id) {
-        if (!(await this.api.updateCart(id, items)).success) throw new Error('Cart was not saved. Please try again.');
+        const result = await this.api.updateCart(id, items);
+        if (!result.success) throw new Error('Cart was not saved. Please try again.');
+        items = result.products ?? items;
       } else {
         const result = await this.api.createCart(items);
         if (!result.success || !result.id) throw new Error('Cart was not saved. Please try again.');
         this.id.set(result.id); this.created.set(result.date ?? '');
+        items = result.products ?? items;
       }
       this.items.set(items);
     } finally { this.busy.set(false); }

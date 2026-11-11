@@ -54,18 +54,43 @@ export class ShopService {
   }
 
   async createCart(user: any, body: any) {
-    if (!Array.isArray(body.products)) return { success: false };
+    const products = await this.cartProducts(body?.products);
+    if (!products) return { success: false };
     if (await this.models.carts.findOne({ user_id: user.id, status: 1 })) return { success: false };
-    const cart = await this.models.carts.create({ user_id: user.id, products: body.products, created_at: new Date() });
-    return { success: true, id: cart._id, date: cart.created_at };
+    const cart = await this.models.carts.create({ user_id: user.id, products, created_at: new Date() });
+    return { success: true, id: cart._id, date: cart.created_at, products };
   }
 
   async updateCart(user: any, body: any) {
-    if (!validId(body.id) || !Array.isArray(body.products)) return { success: false };
+    if (!validId(body?.id)) return { success: false };
+    const products = await this.cartProducts(body.products);
+    if (!products) return { success: false };
     const cart = await this.models.carts.findOneAndUpdate(
-      { _id: body.id, user_id: user.id, status: 1 }, { $set: { products: body.products } },
+      { _id: body.id, user_id: user.id, status: 1 }, { $set: { products } },
     );
-    return { success: Boolean(cart) };
+    return cart ? { success: true, products } : { success: false };
+  }
+
+  private async cartProducts(input: unknown) {
+    if (!Array.isArray(input)) return null;
+    const ids = new Set<string>();
+    for (const item of input) {
+      if (!item || !validId(item.id) || !Number.isSafeInteger(item.count) || item.count < 1) return null;
+      const id = item.id.toLowerCase();
+      if (ids.has(id)) return null;
+      ids.add(id);
+    }
+    if (!input.length) return [];
+    const catalog: ProductRecord[] = await this.models.products.find({ _id: { $in: [...ids] } });
+    const prices = new Map(catalog.map(product => [String(product._id), product.price]));
+    const products: { id: string; count: number; price: number }[] = [];
+    for (const item of input) {
+      const id = item.id.toLowerCase();
+      const price = prices.get(id);
+      if (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * item.count)) return null;
+      products.push({ id, count: item.count, price });
+    }
+    return products;
   }
 
   async cart(user: any) {

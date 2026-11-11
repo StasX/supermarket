@@ -108,6 +108,15 @@ describe('authentication and guards', () => {
 });
 
 describe('cart persistence', () => {
+  it('uses server prices after creating and updating a cart', async () => {
+    const cart = TestBed.inject(CartService); const http = TestBed.inject(HttpTestingController);
+    const add = cart.add(product);
+    http.expectOne('/create-cart').flush({ success: true, id: 'c1', products: [{ id: product.id, count: 1, price: 12 }] });
+    await add; expect(cart.total()).toBe(12);
+    const quantity = cart.quantity(product.id, 2);
+    http.expectOne('/update-cart').flush({ success: true, products: [{ id: product.id, count: 2, price: 13 }] });
+    await quantity; expect(cart.total()).toBe(26);
+  });
   it('restores a server cart and computes its total', async () => {
     const cart = TestBed.inject(CartService); const promise = cart.load(); const http = TestBed.inject(HttpTestingController);
     http.expectOne('/get-cart').flush({ success: true, cart: { id: 'c1', products: [{ id: 'p1', count: 2, price: 10.5 }], created: '2026-01-01' } });

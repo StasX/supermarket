@@ -226,7 +226,7 @@ test('cart updates enforce ownership and open status', async () => {
 
 test('creates and retrieves an open cart using the existing user id', async () => {
   models.carts.create.mockResolvedValue({ _id: 'cart1', created_at: '2026-01-01' });
-  expect((await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200)).body).toEqual({ success: true, id: 'cart1', date: '2026-01-01' });
+  expect((await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200)).body).toEqual({ success: true, id: 'cart1', date: '2026-01-01', products: [] });
   models.carts.findOne.mockResolvedValue({ _id: 'cart1', products: [], created_at: '2026-01-01' });
   expect((await api().get('/get-cart').set('Cookie', cookie()).expect(200)).body).toEqual({ success: true, cart: { id: 'cart1', products: [], created: '2026-01-01' } });
 });
@@ -237,6 +237,37 @@ test('order history returns a response even when no orders exist', async () => {
   expect((await api().get('/get-last-order').set('Cookie', cookie()).expect(200)).body).toEqual({ success: true });
   expect(models.orders.findOne).toHaveBeenCalledWith({ user_id: customer.id });
   expect(sort).toHaveBeenCalledWith({ _id: -1 });
+});
+
+describe.each(['create-cart', 'update-cart'])('%s validates cart contents', route => {
+  const productId = '507f1f77bcf86cd799439013';
+  const item = { id: productId, count: 2, price: -100, extra: 'discard' };
+  const send = products => api().post(`/${route}`).set('Cookie', cookie()).send({ id: customer._id, products });
+
+  test.each([null, {}, [null], ['invalid'], [{ ...item, id: 'invalid' }],
+    ...[0, -1, 1.5, '2', null, Number.MAX_SAFE_INTEGER + 1].map(count => [{ ...item, count }]),
+    [{ id: productId, quantity: 2 }], [item, { ...item, id: productId.toUpperCase() }],
+  ].map(products => [products]))('rejects malformed items without writing (%j)', async products => {
+    expect((await send(products).expect(200)).body).toEqual({ success: false });
+    expect(models.carts.create).not.toHaveBeenCalled();
+    expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('rejects nonexistent products without writing', async () => {
+    expect((await send([item]).expect(200)).body).toEqual({ success: false });
+    expect(models.carts.create).not.toHaveBeenCalled();
+    expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('persists and returns catalog prices, discarding client prices and extra fields', async () => {
+    models.products.find.mockResolvedValue([{ _id: productId, price: 4.5 }]);
+    models.carts.create.mockResolvedValue({ _id: 'cart1' });
+    models.carts.findOneAndUpdate.mockResolvedValue({ _id: customer._id });
+    const products = [{ id: productId, count: 2, price: 4.5 }];
+    expect((await send([item]).expect(200)).body).toMatchObject({ success: true, products });
+    if (route === 'create-cart') expect(models.carts.create.mock.calls[0][0].products).toEqual(products);
+    else expect(models.carts.findOneAndUpdate.mock.calls[0][1]).toEqual({ $set: { products } });
+  });
 });
 
 test('unknown endpoints return 404', async () => {
