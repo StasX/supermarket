@@ -35,3 +35,25 @@ jobs:
 
       - name: Run existing tests
         run: npm test
+
+  integration:
+    name: Integration tests with MongoDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run integration tests
+        run: >-
+          docker compose -p supermarket-integration -f compose.integration.yml
+          up --build --abort-on-container-exit --exit-code-from tests
+
+      - name: Show integration logs on failure
+        if: failure()
+        run: docker compose -p supermarket-integration -f compose.integration.yml logs --no-color
+
+      - name: Clean up integration containers
+        if: always()
+        run: docker compose -p supermarket-integration -f compose.integration.yml down --volumes --remove-orphans

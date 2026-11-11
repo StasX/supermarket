@@ -94,6 +94,15 @@ npm run test:frontend
 
 Backend tests exercise real NestJS HTTP routing, guards, cookie handling, and JWT verification with injected MongoDB model doubles. They do not verify MongoDB persistence. Root `npm run test:backend` builds the Angular frontend first so static-serving tests have a production bundle. GitHub Actions installs both projects' dependencies and runs both suites on pushes and pull requests.
 
+Integration tests in `backend/tests/integration.test.cjs` exercise the real API and MongoDB persistence for signup/login, permissions, products, carts, and logout. With Docker running, use these commands from the project root:
+
+```sh
+docker compose -p supermarket-integration -f compose.integration.yml up --build --abort-on-container-exit --exit-code-from tests
+docker compose -p supermarket-integration -f compose.integration.yml down --volumes
+```
+
+The suite uses an isolated MongoDB container with temporary data and a separate signing key. GitHub Actions runs it in the integration job on pushes, pull requests, and manual runs, and always cleans up the containers.
+
 With Docker Compose running and Google Chrome installed, run `npm --prefix frontend run test:e2e` for Playwright browser tests. Customer signup/cart operations use mocked API responses to avoid changing database records. The administrator smoke test uses the documented demo login against the running backend and reads products without editing them. Override `E2E_BASE_URL` if the app is not on port 3000. For Playwright's bundled browser, install Chromium with `npx --prefix frontend playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`. Browser tests are separate from the default CI unit/HTTP suites.
 
 ## API reference
