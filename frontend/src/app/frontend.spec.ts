@@ -12,6 +12,7 @@ import { CartService } from './cart.service';
 import { routes } from './app.routes';
 import { AppComponent } from './app.component';
 import { LoginPage, SignupPage } from './auth.pages';
+import { ManagementPage } from './store.pages';
 import { emailPattern, passwordsMatch, priceValidator } from './validators';
 
 const customer = { user: 'u1', name: 'John Smith', role: 0 };
@@ -32,6 +33,15 @@ describe('form validation', () => {
 });
 
 describe('API compatibility', () => {
+  it('uploads an image as multipart form data', async () => {
+    const file = new File(['image'], 'cheese.png', { type: 'image/png' });
+    const promise = TestBed.inject(ApiService).uploadProductImage(file);
+    const request = TestBed.inject(HttpTestingController).expectOne('/upload-product-image');
+    expect(request.request.body.get('image')).toBe(file);
+    expect(request.request.headers.has('Content-Type')).toBe(false);
+    request.flush({ success: true, image: '/products/uploads/test.png' });
+    expect((await promise).image).toBe('/products/uploads/test.png');
+  });
   it('normalizes category product ids and prices', async () => {
     const promise = TestBed.inject(ApiService).products('Wine & Drinks');
     const request = TestBed.inject(HttpTestingController).expectOne('/get-products-by-category');
@@ -125,6 +135,13 @@ describe('cart persistence', () => {
 });
 
 describe('Angular rendering and forms', () => {
+  it('allows administrators to edit products with server-hosted image URLs', () => {
+    const fixture = TestBed.createComponent(ManagementPage);
+    fixture.componentInstance.edit({ ...product, image: '/products/apple-juice.png' });
+    expect(fixture.componentInstance.form.valid).toBe(true);
+    fixture.componentInstance.form.controls.image.setValue('/products/../../private.png');
+    expect(fixture.componentInstance.form.controls.image.valid).toBe(false);
+  });
   it('renders the login form and rejects invalid input before HTTP', async () => {
     const fixture = TestBed.createComponent(LoginPage); fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('h1').textContent).toContain('Sign in');

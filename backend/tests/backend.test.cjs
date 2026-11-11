@@ -60,6 +60,47 @@ test('serves the compiled Angular application', async () => {
   await api().get('/' + main[1]).expect(200);
 });
 
+test.each(['edam', 'mascarpone', 'ricotta', 'cheddar', 'emmentaler', 'feta', 'red-apple', 'steak', 'apple-juice', 'fish'])(
+  'serves the generated %s product image without authentication', async name => {
+    const response = await api().get(`/products/${name}.png`).expect(200).expect('Content-Type', /image\/png/);
+    expect(response.body.equals(fs.readFileSync(path.join(__dirname, '..', 'static', 'products', `${name}.png`)))).toBe(true);
+  },
+);
+
+test('missing product images return 404', async () => {
+  await api().get('/products/missing.png').expect(404);
+});
+
+test.each([null, customer])('image uploads require an administrator (%s)', async user => {
+  const call = api().post('/upload-product-image');
+  if (user) call.set('Cookie', cookie(user));
+  const result = await call.attach('image', Buffer.from('not an image'), 'image.png').expect(200);
+  expect(result.body).toEqual({ success: false });
+});
+
+test('uploads detect image format from content and serve the saved file', async () => {
+  const source = path.join(__dirname, '..', 'static', 'products', 'edam.png');
+  const response = await api().post('/upload-product-image').set('Cookie', cookie(admin))
+    .attach('image', source, { filename: '../../untrusted.jpg', contentType: 'image/jpeg' }).expect(200);
+  expect(response.body.image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  const savedPath = path.join(__dirname, '..', 'static', response.body.image);
+  try {
+    const served = await api().get(response.body.image).expect(200).expect('Content-Type', /image\/png/);
+    expect(served.body.equals(fs.readFileSync(source))).toBe(true);
+  } finally { fs.unlinkSync(savedPath); }
+});
+
+test('uploads reject missing files and disguised non-images', async () => {
+  await api().post('/upload-product-image').set('Cookie', cookie(admin)).expect(400);
+  await api().post('/upload-product-image').set('Cookie', cookie(admin))
+    .attach('image', Buffer.from('<svg onload="alert(1)"></svg>'), { filename: 'image.png', contentType: 'image/png' }).expect(400);
+});
+
+test('uploads reject files larger than 5 MB', async () => {
+  await api().post('/upload-product-image').set('Cookie', cookie(admin))
+    .attach('image', Buffer.alloc(5 * 1024 * 1024 + 1), 'large.png').expect(413);
+});
+
 test.each([undefined, 'invalid', jwt.sign({}, 'wrong-key'), jwt.sign({ sub: customer._id, exp: 1 }, key)])(
   'rejects missing, malformed, invalid-signature and expired sessions (%s)', async token => {
     const call = api().get('/get-all-products');

@@ -1,0 +1,46 @@
+{
+  "tool": "built-in imagegen",
+  "promptTemplate": "Use case: product-mockup. Single supermarket catalog product photo: {subject}. Photorealistic studio photography, centered composition, square canvas, object fills about 70 percent of frame with generous margins, soft diffuse lighting, subtle natural contact shadow, seamless warm white background. Crisp natural texture and true-to-life colors. Consistent premium grocery catalog style. No text, no logos, no watermark, no decorative props beyond those specifically described.",
+  "products": [
+    {
+      "file": "static/products/edam.png",
+      "subject": "Edam cheese: a small round red-wax cheese wheel with a wedge cut out showing pale yellow interior"
+    },
+    {
+      "file": "static/products/mascarpone.png",
+      "subject": "Mascarpone cheese: fresh creamy white mascarpone in a small plain ceramic bowl, a spoonful showing silky texture"
+    },
+    {
+      "file": "static/products/ricotta.png",
+      "subject": "Ricotta cheese: fresh white grainy ricotta in a small plain ceramic bowl"
+    },
+    {
+      "file": "static/products/cheddar.png",
+      "subject": "Cheddar cheese: a golden orange cheddar block with two thick slices"
+    },
+    {
+      "file": "static/products/emmentaler.png",
+      "subject": "Emmentaler cheese: a pale yellow Swiss cheese wedge with characteristic round holes"
+    },
+    {
+      "file": "static/products/feta.png",
+      "subject": "Feta cheese: bright white feta block and a few cubes"
+    },
+    {
+      "file": "static/products/red-apple.png",
+      "subject": "a fresh red apple with a small green leaf, one whole apple only"
+    },
+    {
+      "file": "static/products/steak.png",
+      "subject": "a fresh uncooked marbled ribeye beef steak"
+    },
+    {
+      "file": "static/products/apple-juice.png",
+      "subject": "clear glass bottle of golden apple juice with a plain blank label and a small glass of juice, one red apple beside it"
+    },
+    {
+      "file": "static/products/fish.png",
+      "subject": "a fresh whole silver sea bream fish, cleaned and presented neatly"
+    }
+  ]
+}

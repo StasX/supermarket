@@ -1,4 +1,8 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { AuthService } from './auth.service';
 import { ShopService } from './shop.service';
 import { Public, Role, SessionGuard } from './session.guard';
@@ -40,6 +44,23 @@ export class ApiController {
 
   @Role(1) @Post('edit-product') @HttpCode(200)
   edit(@Body() body: any) { return this.shop.saveProduct(body, true); }
+
+  @Role(1) @Post('upload-product-image') @HttpCode(200)
+  @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  async uploadProductImage(@UploadedFile() file?: { buffer: Buffer }) {
+    const bytes = file?.buffer;
+    const extension = bytes && (
+      bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'png' :
+      bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? 'jpg' :
+      bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null
+    );
+    if (!extension) throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
+    const directory = join(__dirname, '..', 'static', 'products', 'uploads');
+    await mkdir(directory, { recursive: true });
+    const filename = `${randomUUID()}.${extension}`;
+    await writeFile(join(directory, filename), bytes, { flag: 'wx' });
+    return { success: true, image: `/products/uploads/${filename}` };
+  }
 
   @Role(0) @Get('total-orders')
   ordersCount() { return this.shop.count('orders', 'ordersCount'); }

@@ -8,3 +8,4 @@ frontend/test-results/
 frontend/playwright-report/
 key.pem
 .env
+backend/static/products/uploads/

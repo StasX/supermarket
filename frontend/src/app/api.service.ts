@@ -29,6 +29,10 @@ export class ApiService {
   saveProduct(product: Omit<Product, 'id'> & { id?: string }) {
     return firstValueFrom(this.http.post<Result>(product.id ? '/edit-product' : '/add-product', { ...product, price: Number(product.price).toFixed(2) }));
   }
+  uploadProductImage(file: File) {
+    const body = new FormData(); body.append('image', file);
+    return firstValueFrom(this.http.post<Result & { image?: string }>('/upload-product-image', body));
+  }
   cart() { return firstValueFrom(this.http.get<Result & { cart?: Cart }>('/get-cart')); }
   createCart(products: CartItem[]) { return firstValueFrom(this.http.post<Result & { id?: string; date?: string }>('/create-cart', { products })); }
   updateCart(id: string, products: CartItem[]) { return firstValueFrom(this.http.post<Result>('/update-cart', { id, products })); }
