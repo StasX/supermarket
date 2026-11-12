@@ -1,6 +1,6 @@
 # Supermarket
 
-Database setup and API reference consolidated from [ReadMe.txt](ReadMe.txt) and [api.doc](api.doc).
+Setup instructions and API reference for the Angular frontend, NestJS backend, and MongoDB database.
 
 ## Database setup
 
@@ -13,7 +13,7 @@ Create a database named `shop` and import the collections from the [db/seeds](db
 
 ## Administrator login
 
-The administrator credentials provided in `ReadMe.txt` are:
+The seeded demo administrator credentials are:
 
 | Field | Value |
 | --- | --- |
@@ -63,7 +63,7 @@ The application and integration tests build `db/Dockerfile`, based on MongoDB **
 
 ### Existing MongoDB 4.4 data
 
-MongoDB 9 cannot directly open a MongoDB 4.4 data directory. Compose now uses a separate `mongodb9_data` volume, initialized with the seed catalog on its first startup. The previous `<compose-project>_mongodb_data` volume is retained, but its customers, carts, orders, and catalog changes are **not automatically migrated**. Do not remove that volume until migration and verification are complete.
+Compose mounts the named volume `mongodb_data` at `/data/db` (normally `<compose-project>_mongodb_data`). A new, empty volume is initialized with the seed catalog; an existing volume is reused without reimporting seeds. Compose does not create a separate volume for MongoDB 9 or automatically migrate existing data. If this volume contains MongoDB 4.4 data, do not start MongoDB 9 against it. Keep the original volume until migration and verification are complete.
 
 To preserve an existing database, stop application writes, back up the 4.4 deployment, and test the supported staged upgrade on a copy of its data: **4.4 -> 5.0 -> 6.0 -> 7.0 -> 8.0 -> 9.0**. At each stage, follow that release's standalone upgrade procedure, verify the database, and set the required feature compatibility version before continuing. MongoDB documents the [9.0 upgrade prerequisites and procedure](https://www.mongodb.com/docs/manual/release-notes/9.0-upgrade-standalone/), including the requirement to reach 8.0 or 8.3 first. Transfer the validated upgraded data into the new deployment only after backup and testing; changing the image tag alone does not migrate the old volume. These repository changes do not run a live data migration.
 
@@ -117,7 +117,7 @@ With Docker Compose running and Google Chrome installed, run `npm --prefix front
 
 ## API reference
 
-The following endpoints and examples reproduce the API documented in `api.doc`, with formatting corrected for valid JSON. Paths and field names retain their original spelling, including `/reconect` and signup field `Id`. The source does not specify a base URL, status codes, error responses, or authentication requirements.
+API paths are relative to the backend origin (`http://localhost:3000` by default). Only `/login` and `/sign-up` are public API endpoints. All other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing sessions and role mismatches return HTTP 200 with `{ "success": false }`. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
 
 ### Products
 
@@ -125,13 +125,14 @@ The following endpoints and examples reproduce the API documented in `api.doc`, 
 | --- | --- | --- |
 | POST | `/add-product` | Create a product. |
 | POST | `/edit-product` | Edit a product. |
+| POST | `/upload-product-image` | Upload a product image. |
 | POST | `/find-product` | Find products by name. |
 | GET | `/get-all-products` | Get all products. |
 | POST | `/get-products-by-category` | Get products by category. |
 
 #### Create or edit a product
 
-`POST /add-product` and `POST /edit-product` use the same documented request example:
+`POST /add-product` and `POST /edit-product` require an administrator session. Both accept:
 
 ```json
 {
@@ -150,7 +151,9 @@ Response:
 }
 ```
 
-The source does not specify how `/edit-product` identifies the product to update.
+For `/edit-product`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must have exactly two decimal places, and category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
+
+`POST /upload-product-image` also requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/<generated-filename>" }`. Use that URL as the product's `image` field.
 
 #### Find a product
 
@@ -164,6 +167,8 @@ Request:
 }
 ```
 
+The request also accepts `product` instead of `name`. Search is case-insensitive and treats the input as literal text.
+
 Response:
 
 ```json
@@ -173,7 +178,7 @@ Response:
     {
       "name": "apple juice",
       "category": "Wine & Drinks",
-      "price": "10.00",
+      "price": 10,
       "image": "...",
       "_id": "..."
     }
@@ -185,7 +190,7 @@ Response:
 
 `GET /get-all-products`
 
-No request parameters are documented. The response has the same `success` and `products` structure shown for `/find-product`, with all products in the array.
+No request parameters are needed. The response has the same `success` and `products` structure shown for `/find-product`, but each product uses `id` instead of `_id` and includes only `id`, `name`, `category`, `price`, and `image`.
 
 #### Get products by category
 
@@ -205,26 +210,10 @@ The response has the same `success` and `products` structure shown for `/find-pr
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/is-new-user` | Check whether the user is new. |
 | POST | `/login` | Log in. |
 | GET | `/logout` | Log out. |
 | GET | `/reconect` | Reconnect a user session. |
-| POST | `/signup` | Create a user. |
-
-#### Check whether a user is new
-
-`GET /is-new-user`
-
-No request parameters are documented.
-
-Response:
-
-```json
-{
-  "success": true,
-  "new": true
-}
-```
+| POST | `/sign-up` | Create a customer account. |
 
 #### Log in
 
@@ -234,7 +223,7 @@ Request:
 
 ```json
 {
-  "user": "User",
+  "username": "j.smith@example.com",
   "password": "P@ssw0rd"
 }
 ```
@@ -243,13 +232,14 @@ Response:
 
 ```json
 {
+  "success": true,
   "role": 1,
   "name": "John Smith",
   "user": "..."
 }
 ```
 
-The response's `user` field contains the user's `_id`.
+The response's `user` field contains the user's `_id`. Successful login sets an HTTP-only `SESSIONID` cookie with a JWT valid for nine hours. Invalid credentials return `{ "success": false }`.
 
 #### Log out
 
@@ -269,17 +259,17 @@ Response:
 
 `GET /reconect`
 
-No request parameters are documented. The response has the same `role`, `name`, and `user` structure shown for `/login`.
+No request parameters are needed. The response includes `success`, `role`, and `user` as in `/login`, but `name` is an object containing `first_name` and `last_name`.
 
 #### Sign up
 
-`POST /signup`
+`POST /sign-up`
 
 Request:
 
 ```json
 {
-  "Id": 12345678,
+  "id": "123456789",
   "firstName": "John",
   "lastName": "Bryce",
   "email": "jbt@example.com",
@@ -297,6 +287,8 @@ Response:
 }
 ```
 
+The ID must contain nine digits and the password must contain at least eight characters. New accounts always receive customer role `0`. Failed signup returns `{ "created": false, "reason": "..." }`.
+
 ### Statistics
 
 | Method | Path | Description |
@@ -304,7 +296,7 @@ Response:
 | GET | `/total-orders` | Get the number of orders. |
 | GET | `/total-products` | Get the number of products. |
 
-Neither endpoint has documented request parameters.
+Both endpoints require a customer session and take no request parameters.
 
 `GET /total-orders` response:
 
@@ -323,3 +315,18 @@ Neither endpoint has documented request parameters.
   "productsCount": 1
 }
 ```
+
+### Carts and order history
+
+All of these endpoints require a customer session and operate on that customer's records.
+
+| Method | Path | Request | Description |
+| --- | --- | --- | --- |
+| POST | `/create-cart` | `{ "products": [{ "id": "<product-object-id>", "count": 1 }] }` | Create an open cart; rejects an existing open cart. |
+| POST | `/update-cart` | `{ "id": "<cart-object-id>", "products": [] }` | Replace the contents of the customer's open cart. |
+| GET | `/get-cart` | None | Return the open cart, if present. |
+| GET | `/get-last-order` | None | Return the most recent order, if present. |
+
+Cart item IDs must identify existing products, quantities must be positive safe integers, and duplicate product IDs are rejected. Prices are taken from the database; client-supplied prices are ignored. An empty product array is allowed.
+
+Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. There is no checkout or order-placement endpoint.
