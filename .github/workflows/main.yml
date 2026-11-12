@@ -47,13 +47,13 @@ jobs:
 
       - name: Run integration tests
         run: >-
-          docker compose -p supermarket-integration -f compose.integration.yml
+          docker compose -p supermarket-integration -f integration.compose.yml
           up --build --abort-on-container-exit --exit-code-from tests
 
       - name: Show integration logs on failure
         if: failure()
-        run: docker compose -p supermarket-integration -f compose.integration.yml logs --no-color
+        run: docker compose -p supermarket-integration -f integration.compose.yml logs --no-color
 
       - name: Clean up integration containers
         if: always()
-        run: docker compose -p supermarket-integration -f compose.integration.yml down --volumes --remove-orphans
+        run: docker compose -p supermarket-integration -f integration.compose.yml down --volumes --remove-orphans

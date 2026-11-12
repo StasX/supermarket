@@ -23,6 +23,7 @@ services:
   minio:
     build:
       context: .
+      dockerfile: minio/Dockerfile
     command: server /data --console-address :9001
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -36,6 +37,7 @@ services:
   mongodb:
     build:
       context: .
+      dockerfile: db/Dockerfile
     environment:
       MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
     volumes:

@@ -2,6 +2,7 @@ services:
   minio:
     build:
       context: .
+      dockerfile: minio/Dockerfile
     command: server /data
     env_file:
       - integration_tests/.env.integration
@@ -16,6 +17,7 @@ services:
   tests:
     build:
       context: .
+      dockerfile: integration_tests/Dockerfile
     environment:
       MONGODB_URI: mongodb://mongo:27017/shop_integration
     env_file:

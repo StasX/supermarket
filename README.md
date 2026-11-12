@@ -115,8 +115,8 @@ Backend tests exercise real NestJS HTTP routing, guards, cookie handling, and JW
 Integration tests in `backend/tests/integration.test.ts` exercise the real API and MongoDB persistence for signup/login, permissions, products, carts, and logout. With Docker running, use these commands from the project root:
 
 ```sh
-docker compose -p supermarket-integration -f compose.integration.yml up --build --abort-on-container-exit --exit-code-from tests
-docker compose -p supermarket-integration -f compose.integration.yml down --volumes
+docker compose -p supermarket-integration -f integration.compose.yml up --build --abort-on-container-exit --exit-code-from tests
+docker compose -p supermarket-integration -f integration.compose.yml down --volumes
 ```
 
 The suite uses isolated MongoDB and MinIO containers with temporary data and a separate signing key. Its S3 settings and disposable credentials live in `integration_tests/.env.integration`, independently of the local `.env`. It also verifies that uploaded images exist in MinIO and are served through the API. GitHub Actions runs it in the integration job on pushes, pull requests, and manual runs, and always cleans up the containers.
