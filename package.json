@@ -10,5 +10,8 @@
         "test:backend": "npm run build:frontend && npm --prefix backend test",
         "test:frontend": "npm --prefix frontend test",
         "test:integration": "npm run build:frontend && npm --prefix backend run test:integration"
+    },
+    "engines": {
+        "node": "^26.13.1"
     }
 }

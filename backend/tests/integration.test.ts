@@ -111,6 +111,7 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
         const login = await request('/login', { method: 'POST', body: { username, password } });
         assert.equal(login.body.success, true);
         assert.equal(login.body.role, role);
+        assert.ok(login.cookie, 'Login must set a session cookie');
         assert.match(login.cookie, /HttpOnly/i);
         const cookie = login.cookie.split(';')[0];
         if (role === 0) customerCookie = cookie;
@@ -174,6 +175,7 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
 test('logout expires the browser session cookie', async () => {
     const logout = await request('/logout', { cookie: customerCookie });
     assert.equal(logout.body.success, true);
+    assert.ok(logout.cookie, 'Logout must expire the session cookie');
     assert.match(logout.cookie, /SESSIONID=;/);
     assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
     assert.equal((await request('/reconect')).body.success, false);
