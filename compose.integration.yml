@@ -1,16 +1,12 @@
 services:
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    build:
+      context: .
     command: server /data
     env_file:
       - integration_tests/.env.integration
     tmpfs:
-      - /data
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+      - /data:uid=1000,gid=1000,mode=0700
   mongo:
     build:
       context: .
@@ -20,7 +16,6 @@ services:
   tests:
     build:
       context: .
-      dockerfile: integration_tests/Dockerfile
     environment:
       MONGODB_URI: mongodb://mongo:27017/shop_integration
     env_file:
