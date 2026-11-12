@@ -12,6 +12,7 @@
         "build:tests": "tsc -p tsconfig.tests.json"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.1168.0",
         "@nestjs/common": "^12.5.0",
         "@nestjs/core": "^12.5.0",
         "@nestjs/platform-express": "^12.5.0",

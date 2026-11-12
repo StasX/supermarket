@@ -12,6 +12,8 @@ import * as net from 'node:net';
 import { once } from 'node:events';
 import mongoose from 'mongoose';
 import * as bcrypt from 'bcryptjs';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
+const { createStorageClient } = require('../dist/image-storage.service');
 const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
@@ -186,6 +188,30 @@ test('concurrent cart creation allows one open cart while preserving closed cart
     await assert.rejects(Cart.create({ user_id: userId, products: [], status: 1 }),
         (error: any) => error.code === 11000);
     await Cart.create({ user_id: userId + 1, products: [], status: 1 });
+});
+
+test('administrator uploads persist in MinIO and are publicly served by the app', async () => {
+    const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
+    const form = new FormData();
+    form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
+    const upload = await fetch(base + '/upload-product-image', {
+        method: 'POST', headers: { Cookie: adminCookie }, body: form,
+        signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(upload.status, 200);
+    const result = await upload.json();
+    assert.match(result.image, /^\/products\/uploads\/[a-f0-9-]+\.png$/);
+    const client = createStorageClient();
+    try {
+        const object = await client.send(new HeadObjectCommand({
+            Bucket: process.env['S3_BUCKET'] || 'product-images', Key: result.image.split('/').pop(),
+        }));
+        assert.equal(object.ContentLength, bytes.length);
+    } finally { client.destroy(); }
+    const image = await fetch(base + result.image, { signal: AbortSignal.timeout(5000) });
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
 });
 
 test('logout expires the browser session cookie', async () => {

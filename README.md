@@ -41,7 +41,13 @@ The frontend uses Angular 22, TypeScript 6, standalone components, reactive form
 
 For frontend development, run the backend on port 3000 and `npm --prefix frontend start` in another terminal. Open `http://localhost:4200`; the Angular development server proxies API calls to NestJS. Change `frontend/proxy.conf.json` if the backend uses a different port. Run `npm run build` from the root to build both projects without starting them.
 
-Product photos live in `backend/static/products` and are served publicly at `/products/<filename>.png`, including in Docker and through the frontend development proxy. The seed catalog uses these local URLs. Existing database volumes retain their product records. In Product manager, administrators select a PNG, JPEG, or WebP file (up to 5 MB) and see a preview before saving. Editing keeps the current image unless a replacement is selected. The administrator-only multipart endpoint `POST /upload-product-image` accepts the `image` field, checks file signatures, and returns the saved image URL. New uploads use unique filenames directly in `backend/static/products`, served at `/products/<filename>`. Compose bind-mounts this directory so uploaded files appear in the project and persist across rebuilds. The directory must be writable by the container user (`node`, UID 1000) on Linux hosts. The existing `product_uploads` volume remains mounted at the legacy `uploads` subdirectory so older `/products/uploads/` URLs continue to work. The legacy product named `Ce` is depicted as ricotta, matching its original image.
+Bundled catalog photos live in `backend/static/products` and remain public at `/products/<filename>.png`. Administrator uploads (PNG, JPEG, or WebP, up to 5 MB) are saved in the private MinIO `product-images` bucket. `POST /upload-product-image` returns `/products/uploads/<generated-filename>`; the backend streams these images without exposing MinIO credentials or requiring browser access to its API. The bucket is created automatically. Image validation and administrator permissions are unchanged.
+
+Compose stores MinIO objects in the named `minio_data` volume and no longer mounts product directories into the app. Add `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env.example` to your `.env`, choosing your own credentials. The MinIO console is available at `http://localhost:9001`; its API stays inside the Compose network. The backend uses the official `@aws-sdk/client-s3` package. It accepts `S3_ENDPOINT` (a full URL), `S3_FORCE_PATH_STYLE`, `S3_CREATE_BUCKET`, `S3_BUCKET` (default `product-images`), and `AWS_REGION` (default `us-east-1`). Credentials use the standard AWS provider chain, including `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN`, and IAM roles. Compose supplies the MinIO endpoint, credentials, path-style addressing, and automatic bucket creation. For a backend running outside Docker, configure them to point to an accessible MinIO instance; port 9000 is not published by the default Compose file.
+
+For AWS S3, provision the bucket first, set `S3_BUCKET` and `AWS_REGION`, omit `S3_ENDPOINT`, and leave `S3_FORCE_PATH_STYLE` and `S3_CREATE_BUCKET` unset or `false`. Provide an IAM role or AWS credentials with object read/write permissions. Update the Compose app environment when deploying against AWS; its default environment intentionally targets the local MinIO service.
+
+Existing uploaded files are not automatically migrated or deleted. Keep the old `product_uploads` volume and locally uploaded files until migration is verified. Copy legacy files into the MinIO bucket using their generated filename as the object key. Existing `/products/uploads/<filename>` URLs then work unchanged. Older records using `/products/<generated-filename>` must be updated to `/products/uploads/<generated-filename>` after copying their images. Bundled catalog records need no changes. Do not run `docker compose down --volumes` if you need to preserve database, signing-key, or MinIO data.
 
 The backend uses NestJS 12 with its Express HTTP adapter and TypeScript 7. It keeps CommonJS application output with NodeNext module resolution so Node.js can load NestJS 12's ESM packages. Routing belongs to `ApiController`, authentication to `AuthService` and `SessionGuard`, and product/cart/order queries to `ShopService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. Existing API paths, including `/sign-up` and `/reconect`, and the `SESSIONID` cookie remain supported. Existing JWT sessions remain accepted; new tokens contain only the user ID and standard timestamps. Checkout is still unfinished.
 
@@ -55,7 +61,7 @@ docker compose up --build -d --wait
 
 Open `http://localhost:3000`. The multi-stage app image compiles Angular and NestJS, then includes the built frontend and production backend dependencies. MongoDB is available only inside the Compose network. Its image imports the four `db/seeds/*.json` files into `shop` when the database volume is first initialized. Existing database volumes are preserved and are not reimported.
 
-Database data and the generated session-signing key are stored in named volumes. Stop the containers while retaining these volumes with `docker compose down`. View logs with `docker compose logs -f`.
+Database data, MinIO objects, and the generated session-signing key are stored in named volumes. Stop the containers while retaining these volumes with `docker compose down`. View logs with `docker compose logs -f`.
 
 The MongoDB image runs as `mongodb:mongodb` (UID/GID 999), including initialization and health checks. New named volumes inherit the image's data-directory ownership; integration tests explicitly give their temporary data directory UID/GID 999. Existing volumes and bind mounts must already be writable by this user because startup no longer runs as root to repair ownership.
 
@@ -111,7 +117,7 @@ docker compose -p supermarket-integration -f compose.integration.yml up --build 
 docker compose -p supermarket-integration -f compose.integration.yml down --volumes
 ```
 
-The suite uses an isolated MongoDB container with temporary data and a separate signing key. GitHub Actions runs it in the integration job on pushes, pull requests, and manual runs, and always cleans up the containers.
+The suite uses isolated MongoDB and MinIO containers with temporary data and a separate signing key. It also verifies that uploaded images exist in MinIO and are served through the API. GitHub Actions runs it in the integration job on pushes, pull requests, and manual runs, and always cleans up the containers.
 
 With Docker Compose running and Google Chrome installed, run `npm --prefix frontend run test:e2e` for Playwright browser tests. Customer signup/cart operations use mocked API responses to avoid changing database records. The administrator smoke test uses the documented demo login against the running backend and reads products without editing them. Override `E2E_BASE_URL` if the app is not on port 3000. For Playwright's bundled browser, install Chromium with `npx --prefix frontend playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`. Browser tests are separate from the default CI unit/HTTP suites.
 
@@ -153,7 +159,7 @@ Response:
 
 For `/edit-product`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must have exactly two decimal places, and category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
 
-`POST /upload-product-image` also requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/<generated-filename>" }`. Use that URL as the product's `image` field.
+`POST /upload-product-image` also requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/uploads/<generated-filename>" }`. Use that URL as the product's `image` field.
 
 #### Find a product
 

@@ -1,4 +1,17 @@
 services:
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: integration
+      MINIO_ROOT_PASSWORD: integration-minio-password
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
   mongo:
     build:
       context: .
@@ -11,6 +24,14 @@ services:
       dockerfile: integration_tests/Dockerfile
     environment:
       MONGODB_URI: mongodb://mongo:27017/shop_integration
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: "true"
+      S3_CREATE_BUCKET: "true"
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: integration
+      AWS_SECRET_ACCESS_KEY: integration-minio-password
     depends_on:
       mongo:
+        condition: service_healthy
+      minio:
         condition: service_healthy

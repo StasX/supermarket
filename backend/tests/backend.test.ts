@@ -11,8 +11,14 @@ import * as bcrypt from 'bcryptjs';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { Readable } from 'node:stream';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { NotFoundException } from '@nestjs/common';
 const { AppModule } = require('../dist/app.module');
 const { MODELS } = require('../dist/database.module');
+const { ImageStorageService } = require('../dist/image-storage.service');
+const images = new Map<string, Buffer>();
 
 const customer = { _id: '507f1f77bcf86cd799439011', id: 123456789, username: 'buyer@example.com',
   name: { first_name: 'John', last_name: 'Smith' }, role: 0 };
@@ -28,6 +34,54 @@ let oldKeyPath: string | undefined;
 const cookie = (user = customer, options = {}) => `SESSIONID=${jwt.sign({}, key, { subject: user._id, expiresIn: '1h', ...options })}`;
 const api = () => request(app.getHttpServer());
 
+test('S3 storage signs path-style requests, preserves image bytes, and maps missing objects to 404', async () => {
+  const keys = ['S3_ENDPOINT', 'S3_FORCE_PATH_STYLE', 'S3_BUCKET', 'S3_CREATE_BUCKET', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];
+  const previous = keys.map(key => process.env[key]);
+  const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const received: { method?: string; url?: string; authorization?: string; body: Buffer }[] = [];
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    received.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: Buffer.concat(chunks) });
+    if (req.url?.includes('missing')) {
+      res.writeHead(404, { 'Content-Type': 'application/xml' });
+      res.end('<Error><Code>NoSuchKey</Code><Message>Missing image</Message></Error>');
+    } else if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(bytes);
+    } else { res.writeHead(200); res.end(); }
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  let storage: InstanceType<typeof ImageStorageService> | undefined;
+  try {
+    Object.assign(process.env, {
+      S3_ENDPOINT: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      S3_FORCE_PATH_STYLE: 'true', S3_BUCKET: 'test-images', S3_CREATE_BUCKET: 'true',
+      AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'test-access', AWS_SECRET_ACCESS_KEY: 'test-secret',
+    });
+    storage = new ImageStorageService();
+    await storage.onModuleInit();
+    await storage.put('abc.png', bytes, 'image/png');
+    const stream = await storage.get('abc.png');
+    const downloaded: Buffer[] = [];
+    for await (const chunk of stream) downloaded.push(Buffer.from(chunk));
+    expect(Buffer.concat(downloaded)).toEqual(bytes);
+    await expect(storage.get('missing.png')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(storage.get('../unsafe.png')).rejects.toBeInstanceOf(NotFoundException);
+    expect(received[0].method).toBe('HEAD');
+    const upload = received.find(item => item.method === 'PUT');
+    if (!upload) throw new Error('S3 upload request was not received');
+    expect(upload.url).toContain('/test-images/abc.png');
+    expect(upload.authorization).toContain('AWS4-HMAC-SHA256 Credential=test-access/');
+    expect(upload.body).toEqual(bytes);
+  } finally {
+    storage?.onModuleDestroy();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    keys.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
+    });
+  }
+});
+
 beforeAll(async () => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'supermarket-nest-'));
   oldKeyPath = process.env['JWT_KEY_PATH'];
@@ -41,6 +95,14 @@ beforeAll(async () => {
   adapterHost.httpAdapter = adapter;
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(MODELS).useValue(models)
+    .overrideProvider(ImageStorageService).useValue({
+      put: async (filename: string, bytes: Buffer) => { images.set(filename, bytes); },
+      get: async (filename: string) => {
+        const bytes = images.get(filename);
+        if (!bytes) throw new NotFoundException();
+        return Readable.from(bytes);
+      },
+    })
     .overrideProvider(HttpAdapterHost).useValue(adapterHost).compile();
   app = module.createNestApplication(adapter);
   app.use(cookieParser());
@@ -49,6 +111,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   jest.resetAllMocks();
+  images.clear();
   models.users.findOne.mockImplementation(async query => query._id === admin._id ? admin : query._id === customer._id ? customer : null);
   models.products.find.mockResolvedValue([]);
 });
@@ -90,12 +153,13 @@ test('uploads detect image format from content and serve the saved file', async 
   const source = path.join(__dirname, '..', 'static', 'products', 'edam.png');
   const response = await api().post('/upload-product-image').set('Cookie', cookie(admin))
     .attach('image', source, { filename: '../../untrusted.jpg', contentType: 'image/jpeg' }).expect(200);
-  expect(response.body.image).toMatch(/^\/products\/[a-f0-9-]+\.png$/);
-  const savedPath = path.join(__dirname, '..', 'static', response.body.image);
-  try {
-    const served = await api().get(response.body.image).expect(200).expect('Content-Type', /image\/png/);
-    expect(served.body.equals(fs.readFileSync(source))).toBe(true);
-  } finally { fs.unlinkSync(savedPath); }
+  expect(response.body.image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  const served = await api().get(response.body.image).expect(200).expect('Content-Type', /image\/png/);
+  expect(served.body.equals(fs.readFileSync(source))).toBe(true);
+});
+
+test('missing uploaded images return 404', async () => {
+  await api().get('/products/uploads/00000000-0000-0000-0000-000000000000.png').expect(404);
 });
 
 test('uploads reject missing files and disguised non-images', async () => {
