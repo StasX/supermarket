@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import './load-env.cjs';
+import './load-env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 const cookieParser = require('cookie-parser');

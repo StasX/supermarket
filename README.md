@@ -67,7 +67,9 @@ For local `npm start`, change `MONGODB_URI` to `mongodb://localhost:27017/shop` 
 
 ## Tests
 
-Tests require Node.js 22.22.3 or another Angular-supported version. Backend tests compile TypeScript, start a NestJS test application, and exercise HTTP endpoints with Jest and Supertest. Frontend tests use Angular TestBed, HttpTestingController, Vitest, and jsdom. No separately running server or MongoDB database is needed for these suites.
+Tests require Node.js 22.22.3 or another Angular-supported version. All application code, backend models, startup scripts, and tests use TypeScript. Backend source compiles into `backend/dist`; backend tests compile separately into `backend/tests-dist`, and Jest loads its compiled configuration from `backend/dist/jest.config.js`.
+
+Backend tests compile TypeScript, start a NestJS test application, and exercise HTTP endpoints with Jest and Supertest. Frontend tests use Angular TestBed, HttpTestingController, Vitest, and jsdom. No separately running server or MongoDB database is needed for these suites.
 
 Install both projects' dependencies from the root before the first run:
 
@@ -94,7 +96,7 @@ npm run test:frontend
 
 Backend tests exercise real NestJS HTTP routing, guards, cookie handling, and JWT verification with injected MongoDB model doubles. They do not verify MongoDB persistence. Root `npm run test:backend` builds the Angular frontend first so static-serving tests have a production bundle. GitHub Actions installs both projects' dependencies and runs both suites on pushes and pull requests.
 
-Integration tests in `backend/tests/integration.test.cjs` exercise the real API and MongoDB persistence for signup/login, permissions, products, carts, and logout. With Docker running, use these commands from the project root:
+Integration tests in `backend/tests/integration.test.ts` exercise the real API and MongoDB persistence for signup/login, permissions, products, carts, and logout. With Docker running, use these commands from the project root:
 
 ```sh
 docker compose -p supermarket-integration -f compose.integration.yml up --build --abort-on-container-exit --exit-code-from tests

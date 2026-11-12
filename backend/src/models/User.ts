@@ -1,5 +1,4 @@
-const mongoose = require("mongoose");
-const bcrypt = require('bcryptjs');
+import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
 const User = new Schema({
     id : {
@@ -30,4 +29,4 @@ const User = new Schema({
         default : 0 /* 0: regular user, 1: administrator */
     }
 });
-module.exports =  mongoose.model('users', User);
+export =  mongoose.model('users', User);

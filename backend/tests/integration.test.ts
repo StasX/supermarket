@@ -1,19 +1,24 @@
-﻿const { before, after, test } = require('node:test');
-const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
-const { tmpdir } = require('node:os');
-const path = require('node:path');
-const net = require('node:net');
-const { once } = require('node:events');
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import { randomBytes } from 'node:crypto';
+﻿import { before, after, test } from 'node:test';
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
+import type { AddressInfo } from 'node:net';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import * as net from 'node:net';
+import { once } from 'node:events';
+import mongoose from 'mongoose';
+import * as bcrypt from 'bcryptjs';
 const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
 
-let server, base, temporaryDirectory, customerCookie, adminCookie;
+let server: ChildProcessByStdio<null, Readable, Readable>;
+let base: string, temporaryDirectory: string, customerCookie: string, adminCookie: string;
 let logs = '';
 const password = 'Integration123!';
 const registration = {
@@ -21,7 +26,7 @@ const registration = {
     pass: password, id: '123456789', city: 'London', street: 'High Street'
 };
 
-async function request(route, { method = 'GET', body, cookie } = {}) {
+async function request(route: string, { method = 'GET', body, cookie }: { method?: string; body?: unknown; cookie?: string } = {}) {
     const response = await fetch(base + route, {
         method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -32,7 +37,7 @@ async function request(route, { method = 'GET', body, cookie } = {}) {
 }
 
 before(async () => {
-    const uri = process.env.MONGODB_URI;
+    const uri = process.env['MONGODB_URI'];
     // This suite clears its database. Refuse the application's normal database.
     assert.ok(uri && /^mongodb:\/\/[^/]+\/shop_integration(?:\?|$)/.test(uri),
         'MONGODB_URI must point to a dedicated shop_integration database');
@@ -44,12 +49,12 @@ before(async () => {
         name: { first_name: 'Admin', last_name: 'User' }, role: 1 });
     temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'shop-integration-'));
     const keyPath = path.join(temporaryDirectory, 'key.pem');
-    writeFileSync(keyPath, require('node:crypto').randomBytes(48).toString('hex'));
+    writeFileSync(keyPath, randomBytes(48).toString('hex'));
     const portProbe = net.createServer();
     portProbe.listen(0, '127.0.0.1');
     await once(portProbe, 'listening');
-    const port = portProbe.address().port;
-    await new Promise(resolve => portProbe.close(resolve));
+    const port = (portProbe.address() as AddressInfo).port;
+    await new Promise<void>((resolve, reject) => portProbe.close((error?: Error) => error ? reject(error) : resolve()));
     base = `http://127.0.0.1:${port}`;
     server = spawn(process.execPath, ['dist/main.js'], {
         cwd: path.join(__dirname, '..'),
@@ -118,7 +123,7 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
 
 test('admin product writes persist, validate input, and enforce customer permissions', async () => {
     const product = { name: 'Test Milk', category: 'Milk & Eggs', price: '4.50', image: 'test-milk.png' };
-    const add = (body, cookie = adminCookie) => request('/add-product', { method: 'POST', body, cookie });
+    const add = (body: unknown, cookie = adminCookie) => request('/add-product', { method: 'POST', body, cookie });
     assert.equal((await add(product, customerCookie)).body.success, false);
     assert.equal(await Product.countDocuments({}), 0);
     assert.equal((await add({ ...product, category: 'Invalid' })).body.success, false);
@@ -143,7 +148,7 @@ test('admin product writes persist, validate input, and enforce customer permiss
 
 test('customer cart creation, duplicate rejection, update and retrieval use MongoDB', async () => {
     assert.deepEqual((await request('/get-cart', { cookie: customerCookie })).body, { success: true });
-    const create = cookie => request('/create-cart', { method: 'POST', body: { products: [] }, cookie });
+    const create = (cookie: string) => request('/create-cart', { method: 'POST', body: { products: [] }, cookie });
     assert.equal((await create(adminCookie)).body.success, false);
     const created = (await create(customerCookie)).body;
     assert.equal(created.success, true);

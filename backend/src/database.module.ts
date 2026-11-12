@@ -1,5 +1,9 @@
 import { Injectable, Module, OnApplicationShutdown } from '@nestjs/common';
 import mongoose from 'mongoose';
+import User = require('./models/User');
+import Product = require('./models/Product');
+import Cart = require('./models/Cart');
+import Order = require('./models/Order');
 
 export const MODELS = 'MODELS';
 
@@ -14,10 +18,10 @@ class DatabaseLifecycle implements OnApplicationShutdown {
     useFactory: async () => {
       await mongoose.connect(process.env['MONGODB_URI'] || 'mongodb://localhost:27017/shop');
       return {
-        users: require('./models/User'),
-        products: require('./models/Product'),
-        carts: require('./models/Cart'),
-        orders: require('./models/Order'),
+        users: User,
+        products: Product,
+        carts: Cart,
+        orders: Order,
       };
     },
   }],

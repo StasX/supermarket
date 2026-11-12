@@ -30,4 +30,4 @@ RUN mkdir -p /app/keys /app/backend/static/products/uploads && chown node:node /
 
 USER node
 EXPOSE 3000
-CMD ["node", "dist/app-entrypoint.cjs"]
+CMD ["node", "dist/app-entrypoint.js"]

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
 const orderSchema = new Schema({
 user_id: Number,
@@ -12,4 +12,4 @@ shipping : {
 },
 credit_card:Number
 });
-module.exports = mongoose.model('orders',orderSchema);
+export = mongoose.model('orders',orderSchema);

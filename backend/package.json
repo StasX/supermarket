@@ -6,9 +6,10 @@
         "build": "tsc -p tsconfig.json",
         "start": "npm run build && node ./dist/main.js",
         "start:prod": "node ./dist/main.js",
-        "test": "npm run build && jest --runInBand",
+        "test": "npm run build && npm run build:tests && jest --config dist/jest.config.js --runInBand",
         "test:backend": "npm test",
-        "test:integration": "npm run build && node --test --test-concurrency=1 tests/integration.test.cjs"
+        "test:integration": "npm run build && npm run build:tests && node --test --test-concurrency=1 tests-dist/integration.test.js",
+        "build:tests": "tsc -p tsconfig.tests.json"
     },
     "dependencies": {
         "@nestjs/common": "^11.0.0",
