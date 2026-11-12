@@ -1,13 +1,10 @@
 services:
   mongo:
-    image: mongo:7
+    build:
+      context: .
+      dockerfile: db/Dockerfile
     tmpfs:
-      - /data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
-      interval: 2s
-      timeout: 5s
-      retries: 30
+      - /data/db:uid=999,gid=999,mode=0700
   tests:
     build:
       context: .

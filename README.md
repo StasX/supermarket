@@ -57,7 +57,15 @@ Open `http://localhost:3000`. The multi-stage app image compiles Angular and Nes
 
 Database data and the generated session-signing key are stored in named volumes. Stop the containers while retaining these volumes with `docker compose down`. View logs with `docker compose logs -f`.
 
-This local setup retains MongoDB 4.4.29 and existing data volumes. The backend now uses Mongoose 8 with promise-based queries. MongoDB 4.4 is an end-of-life release; upgrading the database remains separate work and requires planning for existing data volumes.
+The MongoDB image runs as `mongodb:mongodb` (UID/GID 999), including initialization and health checks. New named volumes inherit the image's data-directory ownership; integration tests explicitly give their temporary data directory UID/GID 999. Existing volumes and bind mounts must already be writable by this user because startup no longer runs as root to repair ownership.
+
+The application and integration tests build `db/Dockerfile`, based on MongoDB **9.0.8**, pinned to the latest stable official Docker image verified on November 12, 2026 ([official image tags](https://github.com/docker-library/official-images/blob/master/library/mongo), [release notes](https://www.mongodb.com/docs/manual/release-notes/9.0/)). Both inherit its `mongosh` health check (5-second interval and timeout, 20 retries, 30-second startup period). The backend uses Mongoose 9 with the MongoDB Node.js 7 driver and promise-based queries.
+
+### Existing MongoDB 4.4 data
+
+MongoDB 9 cannot directly open a MongoDB 4.4 data directory. Compose now uses a separate `mongodb9_data` volume, initialized with the seed catalog on its first startup. The previous `<compose-project>_mongodb_data` volume is retained, but its customers, carts, orders, and catalog changes are **not automatically migrated**. Do not remove that volume until migration and verification are complete.
+
+To preserve an existing database, stop application writes, back up the 4.4 deployment, and test the supported staged upgrade on a copy of its data: **4.4 -> 5.0 -> 6.0 -> 7.0 -> 8.0 -> 9.0**. At each stage, follow that release's standalone upgrade procedure, verify the database, and set the required feature compatibility version before continuing. MongoDB documents the [9.0 upgrade prerequisites and procedure](https://www.mongodb.com/docs/manual/release-notes/9.0-upgrade-standalone/), including the requirement to reach 8.0 or 8.3 first. Transfer the validated upgraded data into the new deployment only after backup and testing; changing the image tag alone does not migrate the old volume. These repository changes do not run a live data migration.
 
 The backend accepts `MONGODB_URI` (defaults to `mongodb://localhost:27017/shop`), `PORT` (defaults to `3000`), and `JWT_KEY_PATH` (defaults to `backend/src/key.pem` when run directly). Compose sets these automatically and creates the signing key on first startup. For local startup, create a key once with `node -e "require('node:fs').writeFileSync('backend/src/key.pem', require('node:crypto').randomBytes(64).toString('hex'), {flag:'wx', mode:0o600})"`.
 
