@@ -10,4 +10,10 @@ const cartSchema = new Schema({
     }
 });
 
+cartSchema.index({ user_id: 1 }, {
+    unique: true,
+    partialFilterExpression: { status: 1 },
+    name: 'one_open_cart_per_user',
+});
+
 export = mongoose.model('carts', cartSchema);

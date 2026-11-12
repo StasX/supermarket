@@ -329,4 +329,6 @@ All of these endpoints require a customer session and operate on that customer's
 
 Cart item IDs must identify existing products, quantities must be positive safe integers, and duplicate product IDs are rejected. Prices are taken from the database; client-supplied prices are ignored. An empty product array is allowed.
 
+A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces one open cart per customer, including concurrent requests. Closed carts are unaffected. Startup waits for this index to be created; if existing data contains multiple open carts for a user, startup fails until those records are reviewed and the extra carts are closed or otherwise resolved. No existing carts are automatically changed or deleted.
+
 Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. There is no checkout or order-placement endpoint.

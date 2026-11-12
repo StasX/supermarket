@@ -239,6 +239,13 @@ test('creates and retrieves an open cart using the existing user id', async () =
   expect((await api().get('/get-cart').set('Cookie', cookie()).expect(200)).body).toEqual({ success: true, cart: { id: 'cart1', products: [], created: '2026-01-01' } });
 });
 
+test('a concurrent duplicate cart insert returns the normal failure response', async () => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.carts.create.mockRejectedValue(new MongoServerError({ code: 11000, message: 'duplicate key' }));
+  expect((await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200)).body)
+    .toEqual({ success: false });
+});
+
 test('order history returns a response even when no orders exist', async () => {
   const sort = jest.fn<(...args: unknown[]) => Promise<null>>().mockResolvedValue(null);
   models.orders.findOne.mockReturnValue({ sort });

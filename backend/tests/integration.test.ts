@@ -172,6 +172,22 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
     assert.equal((await request('/total-orders', { cookie: customerCookie })).body.ordersCount, 0);
 });
 
+test('concurrent cart creation allows one open cart while preserving closed carts', async () => {
+    const userId = Number(registration.id);
+    await Cart.updateMany({ user_id: userId, status: 1 }, { $set: { status: 0 } });
+    const closedCount = await Cart.countDocuments({ user_id: userId, status: 0 });
+    const results = await Promise.all(Array.from({ length: 10 }, () => request('/create-cart', {
+        method: 'POST', cookie: customerCookie, body: { products: [] }
+    })));
+    assert.equal(results.filter(result => result.body.success).length, 1);
+    assert.equal(results.filter(result => result.body.success === false).length, 9);
+    assert.equal(await Cart.countDocuments({ user_id: userId, status: 1 }), 1);
+    assert.equal(await Cart.countDocuments({ user_id: userId, status: 0 }), closedCount);
+    await assert.rejects(Cart.create({ user_id: userId, products: [], status: 1 }),
+        (error: any) => error.code === 11000);
+    await Cart.create({ user_id: userId + 1, products: [], status: 1 });
+});
+
 test('logout expires the browser session cookie', async () => {
     const logout = await request('/logout', { cookie: customerCookie });
     assert.equal(logout.body.success, true);
