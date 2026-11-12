@@ -39,8 +39,8 @@ describe('API compatibility', () => {
     const request = TestBed.inject(HttpTestingController).expectOne('/upload-product-image');
     expect(request.request.body.get('image')).toBe(file);
     expect(request.request.headers.has('Content-Type')).toBe(false);
-    request.flush({ success: true, image: '/products/uploads/test.png' });
-    expect((await promise).image).toBe('/products/uploads/test.png');
+    request.flush({ success: true, image: '/products/test.png' });
+    expect((await promise).image).toBe('/products/test.png');
   });
   it('normalizes category product ids and prices', async () => {
     const promise = TestBed.inject(ApiService).products('Wine & Drinks');

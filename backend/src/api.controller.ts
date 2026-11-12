@@ -55,11 +55,11 @@ export class ApiController {
       bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null
     );
     if (!extension) throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
-    const directory = join(__dirname, '..', 'static', 'products', 'uploads');
+    const directory = join(__dirname, '..', 'static', 'products');
     await mkdir(directory, { recursive: true });
     const filename = `${randomUUID()}.${extension}`;
     await writeFile(join(directory, filename), bytes, { flag: 'wx' });
-    return { success: true, image: `/products/uploads/${filename}` };
+    return { success: true, image: `/products/${filename}` };
   }
 
   @Role(0) @Get('total-orders')

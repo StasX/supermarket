@@ -90,7 +90,7 @@ test('uploads detect image format from content and serve the saved file', async 
   const source = path.join(__dirname, '..', 'static', 'products', 'edam.png');
   const response = await api().post('/upload-product-image').set('Cookie', cookie(admin))
     .attach('image', source, { filename: '../../untrusted.jpg', contentType: 'image/jpeg' }).expect(200);
-  expect(response.body.image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  expect(response.body.image).toMatch(/^\/products\/[a-f0-9-]+\.png$/);
   const savedPath = path.join(__dirname, '..', 'static', response.body.image);
   try {
     const served = await api().get(response.body.image).expect(200).expect('Content-Type', /image\/png/);

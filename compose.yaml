@@ -11,6 +11,7 @@ services:
       JWT_KEY_PATH: ${JWT_KEY_PATH}
     volumes:
       - app_keys:/app/keys
+      - ./backend/static/products:/app/backend/static/products
       - product_uploads:/app/backend/static/products/uploads
     depends_on:
       mongodb:

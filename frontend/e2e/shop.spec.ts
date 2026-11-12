@@ -10,12 +10,12 @@ test('administrator can upload a product image and retain it when editing', asyn
     uploadCount++;
     expect(route.request().headers()['content-type']).toContain('multipart/form-data');
     expect(route.request().postDataBuffer()?.includes(Buffer.from('filename="edam.png"'))).toBe(true);
-    await route.fulfill({ json: { success: true, image: '/products/uploads/new.png' } });
+    await route.fulfill({ json: { success: true, image: '/products/new.png' } });
   });
   for (const endpoint of ['add-product', 'edit-product']) {
     await page.route(`**/${endpoint}`, async route => {
       const body = route.request().postDataJSON();
-      expect(body.image).toBe('/products/uploads/new.png');
+      expect(body.image).toBe('/products/new.png');
       product = { ...product, ...body, price: Number(body.price) };
       await route.fulfill({ json: { success: true } });
     });
