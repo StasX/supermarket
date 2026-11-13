@@ -1,7 +1,8 @@
 import { Routes } from '@angular/router';
 import { LoginPage, SignupPage } from './auth.pages';
 import { sessionGuard } from './auth.service';
-import { AboutPage, CheckoutPage, InfoPage, OrderPage, WelcomePage } from './customer.pages';
+import { AboutPage, InfoPage, OrderPage, WelcomePage } from './customer.pages';
+import { CheckoutPage } from './checkout.page';
 import { ManagementPage, StorePage } from './store.pages';
 
 export const routes: Routes = [

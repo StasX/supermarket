@@ -13,6 +13,7 @@ import { routes } from './app.routes';
 import { AppComponent } from './app.component';
 import { LoginPage, SignupPage } from './auth.pages';
 import { ManagementPage } from './store.pages';
+import { CheckoutPage } from './checkout.page';
 import { emailPattern, passwordsMatch, priceValidator } from './validators';
 
 const customer = { user: 'u1', name: 'John Smith', role: 0 };
@@ -177,6 +178,36 @@ describe('Angular rendering and forms', () => {
     'sets the page title for %s', async (url, title) => {
       TestBed.inject(AuthService).user.set(customer); const harness = await RouterTestingHarness.create();
       await harness.navigateByUrl(url); expect(TestBed.inject(Title).getTitle()).toBe(title);
+      if (url === '/order/payment') {
+        TestBed.inject(HttpTestingController).expectOne('/get-cart').flush({ success: true });
+        TestBed.inject(HttpTestingController).expectOne('/get-all-products').flush({ success: true, products: [] });
+      }
     },
   );
+});
+
+describe('demo checkout', () => {
+  function setup() {
+    const fixture = TestBed.createComponent(CheckoutPage); const page = fixture.componentInstance;
+    page.loading.set(false); page.cart.id.set('c1'); page.cart.items.set([{ id: 'p1', count: 2, price: 10.5 }]);
+    page.form.setValue({ city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01', cardholder: 'John Smith', number: '4242 4242 4242 4242', expiry: '12/99', cvc: '123' });
+    return page;
+  }
+  it('sends shipping and last four digits without card number, expiry or security code', async () => {
+    const page = setup(); const pending = page.submit();
+    const request = TestBed.inject(HttpTestingController).expectOne('/checkout');
+    expect(request.request.body).toEqual({ cartId: 'c1', shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' }, payment: { method: 'credit_card', last4: '4242' } });
+    request.flush({ success: true, order: { id: 'o1', total: 21, shipping: request.request.body.shipping, payment: { mode: 'demo', last4: '4242' } } });
+    await pending; expect(page.completed()?.id).toBe('o1'); expect(page.cart.items()).toEqual([]);
+    expect(page.form.controls.number.value).toBe(''); expect(page.form.controls.cvc.value).toBe('');
+  });
+  it.each([{ date: '2000-01-01' }, { date: '2099-02-30' }, { number: '4111111111111111' }, { expiry: '00/99' }, { cvc: '12' }, { city: ' ' }])('rejects invalid fields (%j)', async invalid => {
+    const page = setup(); page.form.patchValue(invalid); await page.submit();
+    expect(page.error()).toBeTruthy(); TestBed.inject(HttpTestingController).expectNone('/checkout');
+  });
+  it('keeps the cart after failure and prevents double submissions', async () => {
+    const page = setup(); const pending = page.submit(); await page.submit();
+    TestBed.inject(HttpTestingController).expectOne('/checkout').flush({ success: false, reason: 'Cart changed' });
+    await pending; expect(page.cart.id()).toBe('c1'); expect(page.error()).toBe('Cart changed'); expect(page.completed()).toBeNull();
+  });
 });

@@ -33,6 +33,58 @@ let directory: string;
 let oldKeyPath: string | undefined;
 const cookie = (user = customer, options = {}) => `SESSIONID=${jwt.sign({}, key, { subject: user._id, expiresIn: '1h', ...options })}`;
 const api = () => request(app.getHttpServer());
+const checkoutBody = { cartId: customer._id, shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' }, payment: { method: 'credit_card', last4: '4242' } };
+
+test.each([null, admin])('checkout requires a customer session (%s)', async user => {
+  const call = api().post('/checkout');
+  if (user) call.set('Cookie', cookie(user));
+  expect((await call.send(checkoutBody)).body.success).toBe(false);
+});
+
+test.each([
+  { ...checkoutBody, shipping: { ...checkoutBody.shipping, city: ' ' } },
+  { ...checkoutBody, shipping: { ...checkoutBody.shipping, date: '2000-01-01' } },
+  { ...checkoutBody, shipping: { ...checkoutBody.shipping, date: '2099-02-30' } },
+  { ...checkoutBody, payment: { method: 'credit_card', last4: '1234' } },
+  { ...checkoutBody, payment: { ...checkoutBody.payment, number: '4242424242424242', cvc: '123' } },
+])('checkout rejects invalid shipping or payment data (%j)', async body => {
+  expect((await api().post('/checkout').set('Cookie', cookie()).send(body)).body.success).toBe(false);
+  expect(models.carts.findOne).not.toHaveBeenCalled();
+});
+
+test('checkout uses catalog prices and persists only demo payment metadata', async () => {
+  const products = [{ id: admin._id, count: 2, price: 0.01 }];
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
+  models.products.find.mockResolvedValue([{ _id: admin._id, price: 5.25 }]);
+  models.carts.findOneAndUpdate.mockImplementation(async (_query, update) => ({ status: 0, checkout: update.$set.checkout }));
+  models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => ({ _id: 'order1', ...update.$setOnInsert }));
+  const response = await api().post('/checkout').set('Cookie', cookie()).send({ ...checkoutBody, total: 0.01 });
+  expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 10.5, payment: { mode: 'demo', last4: '4242' } } });
+  const saved = models.orders.findOneAndUpdate.mock.calls[0][1].$setOnInsert;
+  expect(saved.products).toEqual([{ id: admin._id, count: 2, price: 5.25 }]);
+  expect(saved).not.toHaveProperty('credit_card');
+  expect(saved.payment).toEqual({ mode: 'demo', method: 'credit_card', last4: '4242' });
+  expect(models.carts.findOneAndUpdate.mock.calls[0][0]).toMatchObject({ _id: customer._id, user_id: customer.id, status: 1, products });
+});
+
+test('checkout rejects another customer cart or an empty cart', async () => {
+  models.carts.findOne.mockResolvedValue(null);
+  expect((await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody)).body.success).toBe(false);
+  expect(models.carts.findOne).toHaveBeenCalledWith({ _id: customer._id, user_id: customer.id });
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products: [] });
+  expect((await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody)).body.success).toBe(false);
+  expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
+});
+
+test('checkout retries a closed cart using its original snapshot', async () => {
+  const snapshot = { cart_id: customer._id, price: 12, shipping: checkoutBody.shipping, payment: { mode: 'demo', method: 'credit_card', last4: '4242' } };
+  models.carts.findOne.mockResolvedValue({ status: 0, checkout: snapshot });
+  models.orders.findOneAndUpdate.mockResolvedValue({ _id: 'order1', ...snapshot });
+  const response = await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody);
+  expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 12 } });
+  expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(models.orders.findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: snapshot });
+});
 
 test('S3 storage signs path-style requests, preserves image bytes, and maps missing objects to 404', async () => {
   const keys = ['S3_ENDPOINT', 'S3_FORCE_PATH_STYLE', 'S3_BUCKET', 'S3_CREATE_BUCKET', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];

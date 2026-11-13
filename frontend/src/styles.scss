@@ -145,6 +145,12 @@ footer {
 
 .panel { background: $surface; border: 1px solid $line; border-radius: 16px; padding: 28px; }
 form { display: grid; gap: 20px; }
+.checkout { max-width: 850px; margin: 0 auto; }
+.checkout fieldset { min-width: 0; margin: 0; padding: 20px; border: 1px solid $line; border-radius: 12px; }
+.checkout legend { padding: 0 8px; font-weight: 600; }
+.checkout-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.checkout-demo { background: $surface-soft; padding: 18px; border-radius: 12px; line-height: 1.7; }
+@media (max-width: 600px) { .checkout-fields { grid-template-columns: 1fr; } }
 label { display: grid; gap: 9px; color: $ink; font-size: .76rem; font-weight: 600; }
 input, select {
   width: 100%;

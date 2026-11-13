@@ -10,6 +10,13 @@ shipping : {
     street: String,
     date: Date
 },
-credit_card:Number
+created_at: Date,
+products: [],
+payment: {
+    mode: String,
+    method: String,
+    last4: String
+}
 });
+orderSchema.index({ cart_id: 1 }, { unique: true, partialFilterExpression: { 'payment.mode': 'demo' }, name: 'one_demo_order_per_cart' });
 export = mongoose.model('orders',orderSchema);

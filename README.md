@@ -37,7 +37,7 @@ db/
 
 Use Node.js 26.13.1 LTS (`.nvmrc`), also pinned in Docker and GitHub Actions. All project manifests require the Node.js 26 line starting at 26.13.1; Node.js 25 is unsupported. Install dependencies with `npm ci --prefix backend` and `npm ci --prefix frontend`, then run `npm start` after setting up MongoDB and a session signing key. Startup builds the Angular application into `frontend/dist/browser` and compiles NestJS into `backend/dist`. NestJS serves the built frontend and API at `http://localhost:3000`, keeping session cookies on the same origin.
 
-The frontend uses Angular 22, TypeScript 6, standalone components, reactive forms, signals, HttpClient, and role-based route guards. AngularJS, UI Router, jQuery, and their old templates have been removed. Hash routing keeps frontend URLs separate from API endpoints; old `#!/` bookmarks are normalized to `#/`. Product listing, category filtering, search, administrator add/edit, signup/login, session reconnect, and saved carts use the existing API. Cart state is restored from MongoDB rather than the old browser localStorage format. Checkout displays its unavailable state; no payment or order placement has been added.
+The frontend uses Angular 22, TypeScript 6, standalone components, reactive forms, signals, HttpClient, and role-based route guards. AngularJS, UI Router, jQuery, and their old templates have been removed. Hash routing keeps frontend URLs separate from API endpoints; old `#!/` bookmarks are normalized to `#/`. Product listing, category filtering, search, administrator add/edit, signup/login, session reconnect, and saved carts use the existing API. Cart state is restored from MongoDB rather than the old browser localStorage format. Checkout collects city, street, shipping date, and demo credit-card details, then saves the order and closes the cart. Demo checkout does not charge a card.
 
 For frontend development, run the backend on port 3000 and `npm --prefix frontend start` in another terminal. Open `http://localhost:4200`; the Angular development server proxies API calls to NestJS. Change `frontend/proxy.conf.json` if the backend uses a different port. Run `npm run build` from the root to build both projects without starting them.
 
@@ -51,7 +51,7 @@ For AWS S3, provision the bucket first, set `S3_BUCKET` and `AWS_REGION`, omit `
 
 Existing uploaded files are not automatically migrated or deleted. Keep the old `product_uploads` volume and locally uploaded files until migration is verified. Copy legacy files into the MinIO bucket using their generated filename as the object key. Existing `/products/uploads/<filename>` URLs then work unchanged. Older records using `/products/<generated-filename>` must be updated to `/products/uploads/<generated-filename>` after copying their images. Bundled catalog records need no changes. Do not run `docker compose down --volumes` if you need to preserve database, signing-key, or MinIO data.
 
-The backend uses NestJS 12 with its Express HTTP adapter and TypeScript 7. It keeps CommonJS application output with NodeNext module resolution so Node.js can load NestJS 12's ESM packages. Routing belongs to `ApiController`, authentication to `AuthService` and `SessionGuard`, and product/cart/order queries to `ShopService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. Existing API paths, including `/sign-up` and `/reconect`, and the `SESSIONID` cookie remain supported. Existing JWT sessions remain accepted; new tokens contain only the user ID and standard timestamps. Checkout is still unfinished.
+The backend uses NestJS 12 with its Express HTTP adapter and TypeScript 7. It keeps CommonJS application output with NodeNext module resolution so Node.js can load NestJS 12's ESM packages. Routing belongs to `ApiController`, authentication to `AuthService` and `SessionGuard`, and product/cart/order queries to `ShopService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. Existing API paths, including `/sign-up` and `/reconect`, and the `SESSIONID` cookie remain supported. Existing JWT sessions remain accepted; new tokens contain only the user ID and standard timestamps. Checkout supports demo orders without real payment processing.
 
 ## Docker
 
@@ -339,4 +339,22 @@ Cart item IDs must identify existing products, quantities must be positive safe 
 
 A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces one open cart per customer, including concurrent requests. Closed carts are unaffected. Startup waits for this index to be created; if existing data contains multiple open carts for a user, startup fails until those records are reviewed and the extra carts are closed or otherwise resolved. No existing carts are automatically changed or deleted.
 
-Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. There is no checkout or order-placement endpoint.
+Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. Customer-only `POST /checkout` places demo orders as described below.
+
+## Demo checkout
+
+Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, street, today or a future shipping date, cardholder name, the test card `4242 4242 4242 4242`, a valid future expiry (`MM/YY`), and any three-digit security code. No charge is made. Real card numbers are not accepted. The browser sends only the test card last four digits; the full number, expiry, cardholder name, and security code are never sent to the backend or stored in the database.
+
+`POST /checkout` requires a customer session and accepts:
+
+```json
+{
+  "cartId": "<cart-object-id>",
+  "shipping": { "city": "Tel Aviv", "street": "Ha Masger 10", "date": "2099-12-01" },
+  "payment": { "method": "credit_card", "last4": "4242" }
+}
+```
+
+Shipping dates are checked against the shop date in `Asia/Jerusalem`. The backend validates cart ownership and recalculates prices from the catalog, ignoring client totals. Success returns `{ "success": true, "order": { "id": "...", "total": 10.50, "shipping": { "city": "...", "street": "...", "date": "..." }, "payment": { "mode": "demo", "method": "credit_card", "last4": "4242" } } }`. Validation failures return `{ "success": false, "reason": "..." }`.
+
+Checkout closes the cart and saves an immutable order snapshot in one atomic cart update. An order is then inserted with a unique partial index for demo orders by cart ID. Concurrent requests and retries reuse this snapshot and return the same order, including recovery after an interrupted order insert; an intervening cart edit prevents stale checkout. Only demo payment metadata is stored. Existing order records are retained. Real payments require a provider integration before this feature can charge cards.

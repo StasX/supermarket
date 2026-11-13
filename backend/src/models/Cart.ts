@@ -4,6 +4,7 @@ const cartSchema = new Schema({
     user_id : Number,
     products : [],
     created_at : Date,
+    checkout: { type: Schema.Types.Mixed, default: undefined },
     status: { 
         type : Number,
         default : 1 /* 1:  opepened. 0: closed */

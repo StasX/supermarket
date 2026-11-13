@@ -83,4 +83,7 @@ export class ApiController {
 
   @Role(0) @Get('get-last-order')
   lastOrder(@Req() request: any) { return this.shop.lastOrder(request.user_data); }
+
+  @Role(0) @Post('checkout') @HttpCode(200)
+  checkout(@Req() request: any, @Body() body: any) { return this.shop.checkout(request.user_data, body); }
 }

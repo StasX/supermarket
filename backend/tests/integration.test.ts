@@ -190,6 +190,32 @@ test('concurrent cart creation allows one open cart while preserving closed cart
     await Cart.create({ user_id: userId + 1, products: [], status: 1 });
 });
 
+test('checkout saves shipping and demo payment once, closes the cart, and survives retries', async () => {
+    const cart = await Cart.findOne({ user_id: Number(registration.id), status: 1 });
+    const product = await Product.findOne({});
+    await Cart.updateOne({ _id: cart._id }, { $set: { products: [{ id: String(product._id), count: 2, price: -1 }] } });
+    const body = { cartId: String(cart._id), shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' }, payment: { method: 'credit_card', last4: '4242' }, total: 0.01 };
+    assert.equal((await request('/checkout', { method: 'POST', cookie: adminCookie, body })).body.success, false);
+    assert.equal((await request('/checkout', { method: 'POST', cookie: customerCookie, body: { ...body, shipping: { ...body.shipping, date: '2000-01-01' } } })).body.success, false);
+    assert.equal((await Cart.findById(cart._id)).status, 1);
+    const results = await Promise.all(Array.from({ length: 5 }, () => request('/checkout', { method: 'POST', cookie: customerCookie, body })));
+    assert.ok(results.every(result => result.body.success));
+    assert.equal(new Set(results.map(result => result.body.order.id)).size, 1);
+    assert.equal(await Order.countDocuments({ cart_id: body.cartId }), 1);
+    const order = await Order.findOne({ cart_id: body.cartId }).lean();
+    assert.equal(order.price, product.price * 2);
+    assert.equal(order.shipping.city, body.shipping.city);
+    assert.equal(order.shipping.date.toISOString().slice(0, 10), body.shipping.date);
+    assert.deepEqual(order.payment, { mode: 'demo', method: 'credit_card', last4: '4242' });
+    assert.equal(order.credit_card, undefined);
+    assert.equal((await Cart.findById(cart._id)).status, 0);
+    assert.equal((await request('/get-cart', { cookie: customerCookie })).body.cart, undefined);
+    assert.equal((await request('/get-last-order', { cookie: customerCookie })).body.order._id, String(order._id));
+    const repeated = await request('/checkout', { method: 'POST', cookie: customerCookie, body });
+    assert.equal(repeated.body.order.id, String(order._id));
+    assert.equal((await request('/create-cart', { method: 'POST', cookie: customerCookie, body: { products: [] } })).body.success, true);
+});
+
 test('administrator uploads persist in MinIO and are publicly served by the app', async () => {
     const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
     const form = new FormData();

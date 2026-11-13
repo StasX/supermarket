@@ -16,7 +16,6 @@ import { CartService } from './cart.service';
         @if (auth.user(); as user) {
           @if (user.role === 0) {
             <a routerLink="/store" routerLinkActive="active">Store</a>
-            <a routerLink="/welcome" routerLinkActive="active">My cart</a>
             <a routerLink="/info" routerLinkActive="active">Shop info</a>
             <a routerLink="/about" routerLinkActive="active">About</a>
           } @else { <a routerLink="/management" routerLinkActive="active">Manage products</a> }
