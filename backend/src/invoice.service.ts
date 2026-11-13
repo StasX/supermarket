@@ -6,7 +6,10 @@ import { createInvoice, InvoiceOrder } from './invoice';
 
 @Injectable()
 export class InvoiceService {
-  constructor(@Inject(MODELS) private readonly models: any, private readonly storage: ImageStorageService) {}
+  constructor(
+    @Inject(MODELS) private readonly models: any,
+    private readonly storage: ImageStorageService,
+  ) {}
 
   async ensure(order: InvoiceOrder & { invoiceKey?: string }) {
     const id = String(order._id);
@@ -20,9 +23,17 @@ export class InvoiceService {
   }
 
   async download(user: { id: number }, id: string) {
-    if (!mongoose.isObjectIdOrHexString(id)) throw new NotFoundException();
-    const order = await this.models.orders.findOne({ _id: id, user_id: user.id, 'payment.mode': 'demo' });
-    if (!order) throw new NotFoundException();
+    if (!mongoose.isObjectIdOrHexString(id)) {
+      throw new NotFoundException();
+    }
+    const order = await this.models.orders.findOne({
+      _id: id,
+      user_id: user.id,
+      'payment.mode': 'demo',
+    });
+    if (!order) {
+      throw new NotFoundException();
+    }
     await this.ensure(order);
     return this.storage.getInvoice(String(order._id));
   }

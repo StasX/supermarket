@@ -1,5 +1,11 @@
 import { Injectable, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CreateBucketCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { Readable } from 'node:stream';
 
 export function createStorageClient() {
@@ -17,38 +23,66 @@ export class ImageStorageService implements OnModuleInit, OnModuleDestroy {
   private readonly client = createStorageClient();
 
   async onModuleInit() {
-    if (process.env['S3_CREATE_BUCKET'] !== 'true') return;
-    try { await this.client.send(new HeadBucketCommand({ Bucket: this.bucket })); }
-    catch (error) {
-      if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) throw error;
-      try { await this.client.send(new CreateBucketCommand({ Bucket: this.bucket })); }
-      catch (creationError) {
-        if ((creationError as Error).name !== 'BucketAlreadyOwnedByYou') throw creationError;
+    if (process.env['S3_CREATE_BUCKET'] !== 'true') {
+      return;
+    }
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch (error) {
+      if (
+        (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404
+      ) {
+        throw error;
+      }
+      try {
+        await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      } catch (creationError) {
+        if ((creationError as Error).name !== 'BucketAlreadyOwnedByYou') {
+          throw creationError;
+        }
       }
     }
   }
 
-  onModuleDestroy() { this.client.destroy(); }
+  onModuleDestroy() {
+    this.client.destroy();
+  }
 
   async put(filename: string, bytes: Buffer, contentType: string) {
-    await this.client.send(new PutObjectCommand({
-      Bucket: this.bucket, Key: filename, Body: bytes, ContentType: contentType,
-    }));
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: filename,
+        Body: bytes,
+        ContentType: contentType,
+      }),
+    );
   }
 
   async get(filename: string) {
-    if (!/^[a-f0-9-]+\.(png|jpg|webp)$/.test(filename)) throw new NotFoundException();
+    if (!/^[a-f0-9-]+\.(png|jpg|webp)$/.test(filename)) {
+      throw new NotFoundException();
+    }
     return this.getObject(filename);
   }
 
   async putInvoice(id: string, bytes: Buffer) {
     try {
-      await this.client.send(new PutObjectCommand({
-        Bucket: this.bucket, Key: `invoices/${id}.pdf`, Body: bytes,
-        ContentType: 'application/pdf', IfNoneMatch: '*',
-      }));
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: `invoices/${id}.pdf`,
+          Body: bytes,
+          ContentType: 'application/pdf',
+          IfNoneMatch: '*',
+        }),
+      );
     } catch (error) {
-      if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 412) throw error;
+      if (
+        (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 412
+      ) {
+        throw error;
+      }
     }
   }
 
@@ -58,11 +92,17 @@ export class ImageStorageService implements OnModuleInit, OnModuleDestroy {
 
   private async getObject(key: string) {
     try {
-      const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
-      if (!(result.Body instanceof Readable)) throw new Error('Object storage returned no readable image body');
+      const result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      if (!(result.Body instanceof Readable)) {
+        throw new Error('Object storage returned no readable image body');
+      }
       return result.Body;
     } catch (error) {
-      if (['NoSuchKey', 'NoSuchBucket', 'NotFound'].includes((error as Error).name)) throw new NotFoundException();
+      if (['NoSuchKey', 'NoSuchBucket', 'NotFound'].includes((error as Error).name)) {
+        throw new NotFoundException();
+      }
       throw error;
     }
   }

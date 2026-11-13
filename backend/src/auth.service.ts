@@ -14,48 +14,102 @@ export class AuthService {
   }
 
   async authenticate(token?: string) {
-    if (!token) return null;
+    if (!token) {
+      return null;
+    }
     try {
       const payload = jwt.verify(token, this.key(), { algorithms: ['HS256'] });
       // Accept existing sessions during the migration, but issue minimal new tokens.
-      const query = payload.sub ? { _id: payload.sub } : (() => {
-        const user = JSON.parse(payload.data);
-        return { _id: user._id, username: user.username, password: user.password };
-      })();
+      let query;
+      if (payload.sub) {
+        query = { _id: payload.sub };
+      } else {
+        const legacyUser = JSON.parse(payload.data);
+        query = {
+          _id: legacyUser._id,
+          username: legacyUser.username,
+          password: legacyUser.password,
+        };
+      }
       const user = await this.models.users.findOne(query);
-      if (!user) return null;
-      return { ...(user.toObject?.() ?? user), isReturning: typeof payload.returning === 'boolean' ? payload.returning : true };
+      if (!user) {
+        return null;
+      }
+      return {
+        ...(user.toObject?.() ?? user),
+        isReturning: typeof payload.returning === 'boolean' ? payload.returning : true,
+      };
     } catch {
       return null;
     }
   }
 
   async login(body: any, response: any) {
-    if (!email(body.username) || typeof body.password !== 'string' || body.password.length < 8) return { success: false };
+    if (!email(body.username) || typeof body.password !== 'string' || body.password.length < 8) {
+      return { success: false };
+    }
     const user = await this.models.users.findOne({ username: body.username });
-    if (!user || !(await compare(body.password, user.password))) return { success: false };
-    const previous = await this.models.users.findOneAndUpdate({ _id: user._id }, { $set: { has_logged_in: true } }, { returnDocument: 'before' });
-    if (!previous) return { success: false };
+    if (!user || !(await compare(body.password, user.password))) {
+      return { success: false };
+    }
+    const previous = await this.models.users.findOneAndUpdate(
+      { _id: user._id },
+      { $set: { has_logged_in: true } },
+      { returnDocument: 'before' },
+    );
+    if (!previous) {
+      return { success: false };
+    }
     const isReturning = previous.has_logged_in !== false;
-    const token = jwt.sign({ returning: isReturning }, this.key(), { subject: String(user._id), expiresIn: '9h', algorithm: 'HS256' });
-    response.cookie('SESSIONID', token, { httpOnly: true, secure: false, sameSite: 'lax', path: '/' });
-    return { success: true, role: user.role, name: `${user.name.first_name} ${user.name.last_name}`, user: user._id, address: user.address, isReturning };
+    const token = jwt.sign({ returning: isReturning }, this.key(), {
+      subject: String(user._id),
+      expiresIn: '9h',
+      algorithm: 'HS256',
+    });
+    response.cookie('SESSIONID', token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      path: '/',
+    });
+    return {
+      success: true,
+      role: user.role,
+      name: `${user.name.first_name} ${user.name.last_name}`,
+      user: user._id,
+      address: user.address,
+      isReturning,
+    };
   }
 
   async signup(body: any) {
     const name = /^(([A-Z][a-z]+)(((\s)[A-Z]([a-z])+)+)*)$/;
     const street = /^(([A-Z0-9][a-z0-9]+)(((\s)[A-Z0-9]([a-z0-9])+)+)*)$/;
-    if (![body.firstName, body.lastName, body.city].every(value => typeof value === 'string' && name.test(value)) ||
-      typeof body.street !== 'string' || !street.test(body.street) || !email(body.email) ||
-      typeof body.pass !== 'string' || body.pass.length < 8 || !/^\d{9}$/.test(String(body.id))) {
+    if (
+      ![body.firstName, body.lastName, body.city].every(
+        (value) => typeof value === 'string' && name.test(value),
+      ) ||
+      typeof body.street !== 'string' ||
+      !street.test(body.street) ||
+      !email(body.email) ||
+      typeof body.pass !== 'string' ||
+      body.pass.length < 8 ||
+      !/^\d{9}$/.test(String(body.id))
+    ) {
       return { created: false, reason: 'one of passed values invalid' };
     }
-    if (await this.models.users.findOne({ username: body.email })) return { created: false, reason: 'user alredy exists' };
+    if (await this.models.users.findOne({ username: body.email })) {
+      return { created: false, reason: 'user alredy exists' };
+    }
     try {
       await this.models.users.create({
-        id: body.id, name: { first_name: body.firstName, last_name: body.lastName },
-        username: body.email, password: await hash(body.pass, 12),
-        address: { city: body.city, street: body.street }, role: 0, has_logged_in: false,
+        id: body.id,
+        name: { first_name: body.firstName, last_name: body.lastName },
+        username: body.email,
+        password: await hash(body.pass, 12),
+        address: { city: body.city, street: body.street },
+        role: 0,
+        has_logged_in: false,
       });
       return { created: true };
     } catch {

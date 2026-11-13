@@ -8,4 +8,4 @@ import { routes } from './app/app.routes';
 if (location.hash.startsWith('#!')) location.replace(location.href.replace('#!', '#'));
 bootstrapApplication(AppComponent, {
   providers: [provideHttpClient(), provideRouter(routes, withHashLocation())],
-}).catch(error => console.error(error));
+}).catch((error) => console.error(error));

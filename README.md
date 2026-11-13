@@ -15,10 +15,10 @@ Create a database named `shop` and import the collections from the [db/seeds](db
 
 The seeded demo administrator credentials are:
 
-| Field | Value |
-| --- | --- |
+| Field    | Value                 |
+| -------- | --------------------- |
 | Username | `j.smith@example.com` |
-| Password | `sec907@Ad0` |
+| Password | `sec907@Ad0`          |
 
 ## Project structure
 
@@ -81,6 +81,12 @@ Copy `.env.example` to `.env` in the repository root before starting Compose. Co
 
 For local `npm start`, change `MONGODB_URI` to `mongodb://localhost:27017/shop` and `JWT_KEY_PATH` to the path of an existing local signing key (for example, `backend/src/key.pem`). The backend also loads the root `.env` automatically, regardless of the working directory, using the configured Node.js 26 runtime. Existing environment variables take precedence; a missing `.env` is allowed. `.env` is ignored by Git and excluded from Docker images.
 
+## Formatting
+
+Install the root development tools with `npm ci`, then run `npm run format` to format the project's TypeScript, Angular templates, SCSS, HTML, JSON, YAML, and Markdown files. Run `npm run format:check` to check formatting without changing files. Shared rules live in `.prettierrc.json` and `.editorconfig`.
+
+Generated files, dependency lockfiles, credentials, image assets, and MongoDB's newline-delimited seed collections are excluded from automatic formatting.
+
 ## Tests
 
 Tests require Node.js 26.13.1 or newer within the 26.x line. All application code, backend models, startup scripts, and tests use TypeScript. Backend source compiles into `backend/dist`; backend tests compile separately into `backend/tests-dist`, and Jest loads its compiled configuration from `backend/dist/jest.config.js`. The backend test command enables Node's VM module support for NestJS 12 dependencies. Frontend tests use Vitest 5 and jsdom 31. Angular packages are aligned at 22.2.6; frontend TypeScript stays at 6.0.3 because Angular 22 requires TypeScript >=6.0 <6.1 ([compatibility table](https://angular.dev/reference/versions)).
@@ -129,14 +135,14 @@ API paths are relative to the backend origin (`http://localhost:3000` by default
 
 ### Products
 
-| Method | Path | Description |
-| --- | --- | --- |
-| POST | `/add-product` | Create a product. |
-| POST | `/edit-product` | Edit a product. |
-| POST | `/upload-product-image` | Upload a product image. |
-| POST | `/find-product` | Find products by name. |
-| GET | `/get-all-products` | Get all products. |
-| POST | `/get-products-by-category` | Get products by category. |
+| Method | Path                        | Description               |
+| ------ | --------------------------- | ------------------------- |
+| POST   | `/add-product`              | Create a product.         |
+| POST   | `/edit-product`             | Edit a product.           |
+| POST   | `/upload-product-image`     | Upload a product image.   |
+| POST   | `/find-product`             | Find products by name.    |
+| GET    | `/get-all-products`         | Get all products.         |
+| POST   | `/get-products-by-category` | Get products by category. |
 
 #### Create or edit a product
 
@@ -216,12 +222,12 @@ The response has the same `success` and `products` structure shown for `/find-pr
 
 ### Users and sessions
 
-| Method | Path | Description |
-| --- | --- | --- |
-| POST | `/login` | Log in. |
-| GET | `/logout` | Log out. |
-| GET | `/reconect` | Reconnect a user session. |
-| POST | `/sign-up` | Create a customer account. |
+| Method | Path        | Description                |
+| ------ | ----------- | -------------------------- |
+| POST   | `/login`    | Log in.                    |
+| GET    | `/logout`   | Log out.                   |
+| GET    | `/reconect` | Reconnect a user session.  |
+| POST   | `/sign-up`  | Create a customer account. |
 
 #### Log in
 
@@ -299,10 +305,10 @@ The ID must contain nine digits and the password must contain at least eight cha
 
 ### Statistics
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/total-orders` | Get the number of orders. |
-| GET | `/total-products` | Get the number of products. |
+| Method | Path              | Description                 |
+| ------ | ----------------- | --------------------------- |
+| GET    | `/total-orders`   | Get the number of orders.   |
+| GET    | `/total-products` | Get the number of products. |
 
 Both endpoints require a customer session and take no request parameters.
 
@@ -328,12 +334,12 @@ Both endpoints require a customer session and take no request parameters.
 
 All of these endpoints require a customer session and operate on that customer's records.
 
-| Method | Path | Request | Description |
-| --- | --- | --- | --- |
-| POST | `/create-cart` | `{ "products": [{ "id": "<product-object-id>", "count": 1 }] }` | Create an open cart; rejects an existing open cart. |
-| POST | `/update-cart` | `{ "id": "<cart-object-id>", "products": [] }` | Replace the contents of the customer's open cart. |
-| GET | `/get-cart` | None | Return the open cart, if present. |
-| GET | `/get-last-order` | None | Return the most recent order, if present. |
+| Method | Path              | Request                                                         | Description                                         |
+| ------ | ----------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| POST   | `/create-cart`    | `{ "products": [{ "id": "<product-object-id>", "count": 1 }] }` | Create an open cart; rejects an existing open cart. |
+| POST   | `/update-cart`    | `{ "id": "<cart-object-id>", "products": [] }`                  | Replace the contents of the customer's open cart.   |
+| GET    | `/get-cart`       | None                                                            | Return the open cart, if present.                   |
+| GET    | `/get-last-order` | None                                                            | Return the most recent order, if present.           |
 
 Cart item IDs must identify existing products, quantities must be positive safe integers, and duplicate product IDs are rejected. Prices are taken from the database; client-supplied prices are ignored. An empty product array is allowed.
 

@@ -1,0 +1,21 @@
+# Dependencies and generated output
+**/node_modules/
+**/dist/
+**/tests-dist/
+**/out-tsc/
+**/.angular/
+**/coverage/
+**/test-results/
+**/playwright-report/
+**/package-lock.json
+
+# Credentials, runtime data, and binary assets
+**/.env
+**/.env.*
+**/key.pem
+backend/static/
+frontend/src/assets/img/*.png
+frontend/src/assets/img/*.ico
+
+# MongoDB seeds use newline-delimited JSON, including intentionally empty collections
+db/seeds/*.json

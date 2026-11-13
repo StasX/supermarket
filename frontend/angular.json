@@ -4,7 +4,9 @@
   "cli": { "analytics": false },
   "projects": {
     "supermarket": {
-      "projectType": "application", "root": "", "sourceRoot": "src",
+      "projectType": "application",
+      "root": "",
+      "sourceRoot": "src",
       "schematics": {
         "@schematics/angular:component": { "style": "scss" }
       },
@@ -12,19 +14,35 @@
         "build": {
           "builder": "@angular/build:application",
           "options": {
-            "browser": "src/main.ts", "index": "src/index.html", "tsConfig": "tsconfig.app.json", "outputPath": "dist",
+            "browser": "src/main.ts",
+            "index": "src/index.html",
+            "tsConfig": "tsconfig.app.json",
+            "outputPath": "dist",
             "assets": [{ "glob": "**/*", "input": "src/assets/img", "output": "assets/img" }],
             "styles": ["src/styles.scss"],
             "inlineStyleLanguage": "scss"
           },
           "configurations": {
-            "production": { "outputHashing": "all", "budgets": [{ "type": "initial", "maximumWarning": "700kB", "maximumError": "1MB" }] },
+            "production": {
+              "outputHashing": "all",
+              "budgets": [{ "type": "initial", "maximumWarning": "700kB", "maximumError": "1MB" }]
+            },
             "development": { "optimization": false, "sourceMap": true }
           },
           "defaultConfiguration": "production"
         },
-        "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "supermarket:build:development" } },
-        "test": { "builder": "@angular/build:unit-test", "options": { "tsConfig": "tsconfig.spec.json", "runner": "vitest", "buildTarget": "supermarket:build:development" } }
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "options": { "buildTarget": "supermarket:build:development" }
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "tsconfig.spec.json",
+            "runner": "vitest",
+            "buildTarget": "supermarket:build:development"
+          }
+        }
       }
     }
   }
