@@ -20,6 +20,7 @@ import { AuthService } from './auth.service';
 import { ShopService } from './shop.service';
 import { InvoiceService } from './invoice.service';
 import { Public, Role, SessionGuard } from './session.guard';
+import { AuthRateLimitGuard } from './auth-rate-limit.guard';
 
 @Controller()
 @UseGuards(SessionGuard)
@@ -60,6 +61,7 @@ export class ApiController {
 
   @Public()
   @Post('login')
+  @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
   login(@Body() body: any, @Res({ passthrough: true }) response: any) {
     return this.auth.login(body, response);
@@ -67,6 +69,7 @@ export class ApiController {
 
   @Public()
   @Post('sign-up')
+  @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
   signup(@Body() body: any) {
     return this.auth.signup(body);

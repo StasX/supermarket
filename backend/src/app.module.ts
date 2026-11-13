@@ -8,6 +8,7 @@ import { ShopService } from './shop.service';
 import { SessionGuard } from './session.guard';
 import { ImageStorageService } from './image-storage.service';
 import { InvoiceService } from './invoice.service';
+import { AuthRateLimitGuard } from './auth-rate-limit.guard';
 
 @Module({
   imports: [
@@ -27,6 +28,13 @@ import { InvoiceService } from './invoice.service';
     ),
   ],
   controllers: [ApiController],
-  providers: [AuthService, ShopService, SessionGuard, ImageStorageService, InvoiceService],
+  providers: [
+    AuthService,
+    ShopService,
+    SessionGuard,
+    AuthRateLimitGuard,
+    ImageStorageService,
+    InvoiceService,
+  ],
 })
 export class AppModule {}

@@ -253,7 +253,7 @@ Response:
 }
 ```
 
-The response's `user` field contains the user's `_id`. Successful login sets an HTTP-only `SESSIONID` cookie with a JWT valid for nine hours. Invalid credentials return `{ "success": false }`.
+The response's `user` field contains the user's `_id`. Successful login sets an HTTP-only `SESSIONID` cookie with a JWT valid for nine hours. The cookie includes `Secure` when `NODE_ENV=production` (including the Docker image), so deployed environments must serve the application over HTTPS. Local development without production mode supports HTTP. Invalid credentials return `{ "success": false }`.
 
 #### Log out
 
@@ -348,6 +348,10 @@ A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces 
 The customer welcome page shows the open cart (including an empty open cart), its contents, total, and creation date labeled **Created at**. Without an open cart, it shows the latest order when available and a **Start shopping** button. The welcome heading uses login history: signup marks a new account as not yet logged in, and the first successful login atomically marks it as logged in. Later logins show **Welcome back to Dragon shop** even without prior orders. The signed session retains its greeting across page reloads. Existing accounts and legacy sessions are treated as returning customers.
 
 Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. Customer-only `POST /checkout` places demo orders as described below.
+
+## Authentication rate limits
+
+Login allows 20 requests and signup allows 5 requests per connection peer IP address per 15-minute window, with independent limits for each endpoint. All attempts count, including successful and invalid requests. Excess requests return HTTP 429 with `{ "success": false, "reason": "Too many attempts. Please try again later." }` and a `Retry-After` header in seconds. Limits are held in memory per application process and reset on restart; replicas do not share counters. Forwarding headers are ignored to prevent spoofing, so clients behind a reverse proxy share its peer-address limit. Multi-instance deployments should enforce shared limits at the ingress or use a shared limiter store.
 
 ## Demo checkout
 

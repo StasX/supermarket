@@ -16,6 +16,8 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { NotFoundException } from '@nestjs/common';
 const { AppModule } = require('../dist/app.module');
+const { AuthRateLimitGuard } = require('../dist/auth-rate-limit.guard');
+let authRateLimiter = new AuthRateLimitGuard();
 const { MODELS } = require('../dist/database.module');
 const { ImageStorageService } = require('../dist/image-storage.service');
 const { createInvoice } = require('../dist/invoice');
@@ -373,6 +375,8 @@ beforeAll(async () => {
   const adapterHost = new HttpAdapterHost();
   adapterHost.httpAdapter = adapter;
   const module = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(AuthRateLimitGuard)
+    .useValue({ canActivate: (context: any) => authRateLimiter.canActivate(context) })
     .overrideProvider(MODELS)
     .useValue(models)
     .overrideProvider(ImageStorageService)
@@ -401,6 +405,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  authRateLimiter = new AuthRateLimitGuard();
   jest.resetAllMocks();
   images.clear();
   invoiceWrite.mockImplementation(async (id: string, bytes: Buffer) => {
@@ -598,6 +603,53 @@ for (const [method, route, allowedRole] of [
   });
 }
 
+test.each([
+  ['login', 20],
+  ['sign-up', 5],
+] as const)(
+  '%s limits requests before accessing the database and allows requests after expiry',
+  async (route, limit) => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      for (let attempt = 0; attempt < limit; attempt++) {
+        await api().post(`/${route}`).send({}).expect(200);
+      }
+      models.users.findOne.mockClear();
+      models.users.create.mockClear();
+      const blocked = await api()
+        .post(`/${route}`)
+        .set('X-Forwarded-For', '203.0.113.42')
+        .send({ username: customer.username, password: 'password123' })
+        .expect(429);
+      expect(blocked.body.success).toBe(false);
+      expect(blocked.headers['retry-after']).toBe('900');
+      expect(models.users.findOne).not.toHaveBeenCalled();
+      expect(models.users.create).not.toHaveBeenCalled();
+      await api()
+        .post(route === 'login' ? '/sign-up' : '/login')
+        .send({})
+        .expect(200);
+      clock.mockReturnValue(Date.now() + 15 * 60 * 1000);
+      await api().post(`/${route}`).send({}).expect(200);
+    } finally {
+      clock.mockRestore();
+    }
+  },
+);
+
+test('authentication rate limits are independent for different peer addresses', () => {
+  const context = (address: string) => ({
+    getHandler: () => ({ name: 'login' }),
+    switchToHttp: () => ({
+      getRequest: () => ({ socket: { remoteAddress: address } }),
+      getResponse: () => ({ setHeader: jest.fn() }),
+    }),
+  });
+  for (let i = 0; i < 20; i++) authRateLimiter.canActivate(context('192.0.2.1'));
+  expect(() => authRateLimiter.canActivate(context('192.0.2.1'))).toThrow();
+  expect(authRateLimiter.canActivate(context('192.0.2.2'))).toBe(true);
+});
+
 test('login sets an HTTP-only cookie without exposing the password hash in its payload', async () => {
   models.users.findOne.mockResolvedValue({
     ...customer,
@@ -619,6 +671,39 @@ test('login sets an HTTP-only cookie without exposing the password hash in its p
   expect(jwt.verify(token, key)).toMatchObject({ sub: customer._id });
   expect(jwt.decode(token)).not.toHaveProperty('data');
 });
+
+test.each(['production', 'development', 'test', undefined])(
+  'login sets Secure only in production (NODE_ENV=%s)',
+  async (environment) => {
+    const previousEnvironment = process.env['NODE_ENV'];
+    try {
+      if (environment === undefined) {
+        delete process.env['NODE_ENV'];
+      } else {
+        process.env['NODE_ENV'] = environment;
+      }
+      models.users.findOne.mockResolvedValue({
+        ...customer,
+        password: await bcrypt.hash('password123', 4),
+      });
+      const result = await api()
+        .post('/login')
+        .send({ username: customer.username, password: 'password123' })
+        .expect(200);
+      expect(result.body.success).toBe(true);
+      const sessionCookie = result.headers['set-cookie'][0];
+      expect(sessionCookie.includes('; Secure')).toBe(environment === 'production');
+      expect(sessionCookie).toContain('; HttpOnly');
+      expect(sessionCookie).toContain('; SameSite=Lax');
+    } finally {
+      if (previousEnvironment === undefined) {
+        delete process.env['NODE_ENV'];
+      } else {
+        process.env['NODE_ENV'] = previousEnvironment;
+      }
+    }
+  },
+);
 
 test.each([false, true, undefined])(
   'login distinguishes first and returning sessions and preserves the greeting on reconnect (%s)',
