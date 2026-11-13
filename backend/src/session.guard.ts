@@ -26,9 +26,11 @@ export class SessionGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<SessionRequest>();
     const user = await this.auth.authenticate(request.cookies?.SESSIONID);
     const role = this.reflector.get('role', context.getHandler());
-    if (!user || (role !== undefined && user.role !== role)) {
-      // Preserve the legacy JSON contract used by the AngularJS client.
-      throw new HttpException({ success: false }, 200);
+    if (!user) {
+      throw new HttpException({ success: false }, 401);
+    }
+    if (role !== undefined && user.role !== role) {
+      throw new HttpException({ success: false }, 403);
     }
     request.user_data = user;
     return true;

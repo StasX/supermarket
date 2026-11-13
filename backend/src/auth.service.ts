@@ -1,5 +1,5 @@
 import { LoginInput, SignupInput, CookieResponse, record } from './contracts';
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpException, Inject, Injectable } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compare, hash } from 'bcryptjs';
@@ -60,11 +60,11 @@ export class AuthService {
 
   async login(body: LoginInput, response: CookieResponse) {
     if (!email(body.username) || typeof body.password !== 'string' || body.password.length < 8) {
-      return { success: false };
+      throw new HttpException({ success: false }, 401);
     }
     const user = await this.models.users.findOne({ username: body.username });
     if (!user || !(await compare(body.password, user.password))) {
-      return { success: false };
+      throw new HttpException({ success: false }, 401);
     }
     const previous = await this.models.users.findOneAndUpdate(
       { _id: user._id },
@@ -72,7 +72,7 @@ export class AuthService {
       { returnDocument: 'before' },
     );
     if (!previous) {
-      return { success: false };
+      throw new HttpException({ success: false }, 401);
     }
     const isReturning = previous.has_logged_in !== false;
     const token = jwt.sign({ returning: isReturning }, this.key(), {

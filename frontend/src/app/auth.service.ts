@@ -1,6 +1,7 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
-import { ApiService, User } from './api.service';
+import { ApiService, User, Result } from './api.service';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -9,7 +10,15 @@ export class AuthService {
   private reconnecting?: Promise<User | null>;
 
   async login(username: string, password: string) {
-    const result = await this.api.login(username, password);
+    const result = await this.api
+      .login(username, password)
+      .catch((error: unknown): Result & Partial<User> => {
+        if (error instanceof HttpErrorResponse && error.status === 401) {
+          this.user.set(null);
+          return { success: false };
+        }
+        throw error;
+      });
     if (!result.success || result.user === undefined || result.role === undefined) {
       return false;
     }
@@ -56,7 +65,11 @@ export class AuthService {
   }
 
   async logout() {
-    const result = await this.api.logout();
+    const result = await this.api.logout().catch((error: unknown) => {
+      // An expired session is already signed out.
+      if (error instanceof HttpErrorResponse && error.status === 401) return { success: true };
+      throw error;
+    });
     if (!result.success) {
       throw new Error('Sign out failed. Please try again.');
     }

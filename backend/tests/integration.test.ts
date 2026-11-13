@@ -35,7 +35,12 @@ const registration = {
 
 async function request(
   route: string,
-  { method = 'GET', body, cookie }: { method?: string; body?: unknown; cookie?: string } = {},
+  {
+    method = 'GET',
+    body,
+    cookie,
+    status = 200,
+  }: { method?: string; body?: unknown; cookie?: string; status?: number } = {},
 ) {
   const response = await fetch(base + route, {
     method,
@@ -43,7 +48,7 @@ async function request(
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
   });
-  assert.equal(response.status, 200, route);
+  assert.equal(response.status, status, route);
   return { body: await response.json(), cookie: response.headers.get('set-cookie') };
 }
 
@@ -120,7 +125,7 @@ test('public storefront is served and protected routes reject anonymous requests
   assert.equal(response.status, 200);
   assert.match(await response.text(), /<html/i);
   for (const route of ['/get-all-products', '/get-cart', '/reconect', '/total-products']) {
-    assert.deepEqual((await request(route)).body, { success: false });
+    assert.deepEqual((await request(route, { status: 401 })).body, { success: false });
   }
 });
 
@@ -141,9 +146,12 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
     { username: registration.email, password: 'Incorrect123' },
     { username: 'missing@example.com', password },
   ]) {
-    assert.deepEqual((await request('/login', { method: 'POST', body: credentials })).body, {
-      success: false,
-    });
+    assert.deepEqual(
+      (await request('/login', { method: 'POST', body: credentials, status: 401 })).body,
+      {
+        success: false,
+      },
+    );
   }
   for (const [username, role] of [
     [registration.email, 0],
@@ -185,7 +193,12 @@ test('admin product writes persist, validate input, and enforce customer permiss
     image: 'test-milk.png',
   };
   const add = (body: unknown, cookie = adminCookie) =>
-    request('/add-product', { method: 'POST', body, cookie });
+    request('/add-product', {
+      method: 'POST',
+      body,
+      cookie,
+      status: cookie === adminCookie ? 200 : 403,
+    });
   assert.equal((await add(product, customerCookie)).body.success, false);
   assert.equal(await Product.countDocuments({}), 0);
   assert.equal((await add({ ...product, category: 'Invalid' })).body.success, false);
@@ -196,8 +209,14 @@ test('admin product writes persist, validate input, and enforce customer permiss
   assert.equal(stored.price, 4.5);
   const edit = { ...product, id: String(stored._id), price: '5.25' };
   assert.equal(
-    (await request('/edit-product', { method: 'POST', body: edit, cookie: customerCookie })).body
-      .success,
+    (
+      await request('/edit-product', {
+        method: 'POST',
+        body: edit,
+        cookie: customerCookie,
+        status: 403,
+      })
+    ).body.success,
     false,
   );
   assert.equal(
@@ -226,7 +245,12 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
     success: true,
   });
   const create = (cookie: string) =>
-    request('/create-cart', { method: 'POST', body: { products: [] }, cookie });
+    request('/create-cart', {
+      method: 'POST',
+      body: { products: [] },
+      cookie,
+      status: cookie === adminCookie ? 403 : 200,
+    });
   assert.equal((await create(adminCookie)).body.success, false);
   const created = (await create(customerCookie)).body;
   assert.equal(created.success, true);
@@ -395,8 +419,10 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
   } finally {
     client.destroy();
   }
-  assert.deepEqual((await request(url)).body, { success: false });
-  assert.deepEqual((await request(url, { cookie: adminCookie })).body, { success: false });
+  assert.deepEqual((await request(url, { status: 401 })).body, { success: false });
+  assert.deepEqual((await request(url, { cookie: adminCookie, status: 403 })).body, {
+    success: false,
+  });
   await request('/sign-up', {
     method: 'POST',
     body: { ...registration, id: '222333444', email: 'other@example.com' },
@@ -448,5 +474,5 @@ test('logout expires the browser session cookie', async () => {
   assert.ok(logout.cookie, 'Logout must expire the session cookie');
   assert.match(logout.cookie, /SESSIONID=;/);
   assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
-  assert.equal((await request('/reconect')).body.success, false);
+  assert.equal((await request('/reconect', { status: 401 })).body.success, false);
 });

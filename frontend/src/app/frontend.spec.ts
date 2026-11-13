@@ -122,12 +122,35 @@ describe('authentication and guards', () => {
     expect(await promise).toBe(true);
     expect(auth.user()).toEqual(customer);
   });
+  it.each([401, 403, 500])('login handles HTTP %s', async (status) => {
+    const auth = TestBed.inject(AuthService);
+    const pending = auth.login('buyer@example.com', 'password123');
+    const result = pending.then(
+      (value) => value,
+      () => 'error',
+    );
+    TestBed.inject(HttpTestingController)
+      .expectOne('/login')
+      .flush({ success: false }, { status, statusText: 'Error' });
+    expect(await result).toBe(status === 401 ? false : 'error');
+    expect(auth.user()).toBeNull();
+  });
+  it('clears local session after logout returns HTTP 401', async () => {
+    const auth = TestBed.inject(AuthService);
+    auth.user.set(customer);
+    const pending = auth.logout();
+    TestBed.inject(HttpTestingController)
+      .expectOne('/logout')
+      .flush({ success: false }, { status: 401, statusText: 'Unauthorized' });
+    await pending;
+    expect(auth.user()).toBeNull();
+  });
   it.each(['denied', 'network'])('reconnect handles %s', async (outcome) => {
     const auth = TestBed.inject(AuthService);
     const promise = auth.reconnect();
     const request = TestBed.inject(HttpTestingController).expectOne('/reconect');
     if (outcome === 'denied') {
-      request.flush({ success: false });
+      request.flush({ success: false }, { status: 401, statusText: 'Unauthorized' });
     } else {
       request.flush('error', { status: 500, statusText: 'Error' });
     }
@@ -192,7 +215,9 @@ describe('authentication and guards', () => {
     const result = TestBed.runInInjectionContext(() =>
       sessionGuard(route, {} as RouterStateSnapshot),
     );
-    TestBed.inject(HttpTestingController).expectOne('/reconect').flush({ success: false });
+    TestBed.inject(HttpTestingController)
+      .expectOne('/reconect')
+      .flush({ success: false }, { status: 401, statusText: 'Unauthorized' });
     expect(TestBed.inject(Router).serializeUrl((await result) as UrlTree)).toBe('/login');
   });
 });

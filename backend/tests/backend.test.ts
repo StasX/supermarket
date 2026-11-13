@@ -53,7 +53,7 @@ const checkoutBody = {
 test.each([null, admin])('checkout requires a customer session (%s)', async (user) => {
   const call = api().post('/checkout');
   if (user) call.set('Cookie', cookie(user));
-  expect((await call.send(checkoutBody)).body.success).toBe(false);
+  expect((await call.send(checkoutBody).expect(user ? 403 : 401)).body.success).toBe(false);
 });
 
 test.each([
@@ -174,7 +174,7 @@ test('PDF invoices include the review table, frozen line prices and shipping det
 test.each([null, admin])('invoice downloads require a customer session (%s)', async (user) => {
   const call = api().get(`/orders/${customer._id}/invoice`);
   if (user) call.set('Cookie', cookie(user));
-  expect((await call.expect(200)).body).toEqual({ success: false });
+  expect((await call.expect(user ? 403 : 401)).body).toEqual({ success: false });
   expect(models.orders.findOne).not.toHaveBeenCalled();
 });
 
@@ -468,7 +468,9 @@ test('missing product images return 404', async () => {
 test.each([null, customer])('image uploads require an administrator (%s)', async (user) => {
   const call = api().post('/upload-product-image');
   if (user) call.set('Cookie', cookie(user));
-  const result = await call.attach('image', Buffer.from('not an image'), 'image.png').expect(200);
+  const result = await call
+    .attach('image', Buffer.from('not an image'), 'image.png')
+    .expect(user ? 403 : 401);
   expect(result.body).toEqual({ success: false });
 });
 
@@ -519,7 +521,7 @@ test.each([
 ])('rejects missing, malformed, invalid-signature and expired sessions (%s)', async (token) => {
   const call = api().get('/get-all-products');
   if (token) call.set('Cookie', `SESSIONID=${token}`);
-  expect((await call.expect(200)).body).toEqual({ success: false });
+  expect((await call.expect(401)).body).toEqual({ success: false });
   expect(models.products.find).not.toHaveBeenCalled();
 });
 
@@ -596,7 +598,7 @@ for (const [method, route, allowedRole] of [
       [method](`/${route}`)
       .set('Cookie', cookie(allowedRole === 1 ? customer : admin))
       .send({})
-      .expect(200);
+      .expect(403);
     expect(result.body).toEqual({ success: false });
     expect(models.products.create).not.toHaveBeenCalled();
     expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
@@ -612,7 +614,10 @@ test.each([
     const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now());
     try {
       for (let attempt = 0; attempt < limit; attempt++) {
-        await api().post(`/${route}`).send({}).expect(200);
+        await api()
+          .post(`/${route}`)
+          .send({})
+          .expect(route === 'login' ? 401 : 200);
       }
       models.users.findOne.mockClear();
       models.users.create.mockClear();
@@ -628,9 +633,12 @@ test.each([
       await api()
         .post(route === 'login' ? '/sign-up' : '/login')
         .send({})
-        .expect(200);
+        .expect(route === 'login' ? 200 : 401);
       clock.mockReturnValue(Date.now() + 15 * 60 * 1000);
-      await api().post(`/${route}`).send({}).expect(200);
+      await api()
+        .post(`/${route}`)
+        .send({})
+        .expect(route === 'login' ? 401 : 200);
     } finally {
       clock.mockRestore();
     }
@@ -738,7 +746,7 @@ test('login rejects incorrect credentials and invalid input', async () => {
     { username: customer.username, password: 'wrongpass' },
     { username: 'invalid', password: 'short' },
   ]) {
-    const result = await api().post('/login').send(body).expect(200);
+    const result = await api().post('/login').send(body).expect(401);
     expect(result.body).toEqual({ success: false });
     expect(result.headers['set-cookie']).toBeUndefined();
   }

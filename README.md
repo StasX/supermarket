@@ -131,7 +131,7 @@ With Docker Compose running and Google Chrome installed, run `npm --prefix front
 
 ## API reference
 
-API paths are relative to the backend origin (`http://localhost:3000` by default). Only `/login` and `/sign-up` are public API endpoints. All other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing sessions and role mismatches return HTTP 200 with `{ "success": false }`. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
+API paths are relative to the backend origin (`http://localhost:3000` by default). Only `/login` and `/sign-up` are public API endpoints. All other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
 
 ### Products
 
