@@ -36,3 +36,10 @@ class DatabaseLifecycle implements OnApplicationShutdown {
   exports: [MODELS],
 })
 export class DatabaseModule {}
+
+export interface DatabaseModels {
+  users: typeof User;
+  products: typeof Product;
+  carts: typeof Cart;
+  orders: typeof Order;
+}

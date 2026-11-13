@@ -1,6 +1,7 @@
+import type { OrderRecord } from '../contracts';
 import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
-const orderSchema = new Schema({
+const orderSchema = new Schema<OrderRecord>({
   user_id: Number,
   username: String,
   cart_id: String,

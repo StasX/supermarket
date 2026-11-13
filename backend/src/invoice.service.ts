@@ -1,13 +1,13 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import mongoose from 'mongoose';
-import { MODELS } from './database.module';
+import { MODELS, DatabaseModels } from './database.module';
 import { ImageStorageService } from './image-storage.service';
 import { createInvoice, InvoiceOrder } from './invoice';
 
 @Injectable()
 export class InvoiceService {
   constructor(
-    @Inject(MODELS) private readonly models: any,
+    @Inject(MODELS) private readonly models: DatabaseModels,
     private readonly storage: ImageStorageService,
   ) {}
 

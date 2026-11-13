@@ -1,4 +1,15 @@
 import {
+  LoginInput,
+  SignupInput,
+  CategoryInput,
+  SearchInput,
+  ProductInput,
+  CartInput,
+  CheckoutInput,
+  SessionRequest,
+  CookieResponse,
+} from './contracts';
+import {
   BadRequestException,
   Body,
   Controller,
@@ -35,9 +46,9 @@ export class ApiController {
   @Role(0)
   @Get('orders/:id/invoice')
   async invoice(
-    @Req() request: any,
+    @Req() request: SessionRequest,
     @Param('id') id: string,
-    @Res({ passthrough: true }) response: any,
+    @Res({ passthrough: true }) response: CookieResponse,
   ) {
     const stream = await this.invoices.download(request.user_data, id);
     response.setHeader('Cache-Control', 'private, no-store');
@@ -63,7 +74,7 @@ export class ApiController {
   @Post('login')
   @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
-  login(@Body() body: any, @Res({ passthrough: true }) response: any) {
+  login(@Body() body: LoginInput, @Res({ passthrough: true }) response: CookieResponse) {
     return this.auth.login(body, response);
   }
 
@@ -71,18 +82,18 @@ export class ApiController {
   @Post('sign-up')
   @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
-  signup(@Body() body: any) {
+  signup(@Body() body: SignupInput) {
     return this.auth.signup(body);
   }
 
   @Get('logout')
-  logout(@Res({ passthrough: true }) response: any) {
+  logout(@Res({ passthrough: true }) response: CookieResponse) {
     response.clearCookie('SESSIONID', { path: '/' });
     return { success: true };
   }
 
   @Get('reconect')
-  reconnect(@Req() request: any) {
+  reconnect(@Req() request: SessionRequest) {
     const user = request.user_data;
     return {
       success: true,
@@ -101,27 +112,27 @@ export class ApiController {
 
   @Post('get-products-by-category')
   @HttpCode(200)
-  category(@Body() body: any) {
+  category(@Body() body: CategoryInput) {
     return this.shop.category(body);
   }
 
   @Post('find-product')
   @HttpCode(200)
-  find(@Body() body: any) {
+  find(@Body() body: SearchInput) {
     return this.shop.find(body);
   }
 
   @Role(1)
   @Post('add-product')
   @HttpCode(200)
-  add(@Body() body: any) {
+  add(@Body() body: ProductInput) {
     return this.shop.saveProduct(body);
   }
 
   @Role(1)
   @Post('edit-product')
   @HttpCode(200)
-  edit(@Body() body: any) {
+  edit(@Body() body: ProductInput) {
     return this.shop.saveProduct(body, true);
   }
 
@@ -162,33 +173,33 @@ export class ApiController {
   @Role(0)
   @Post('create-cart')
   @HttpCode(200)
-  createCart(@Req() request: any, @Body() body: any) {
+  createCart(@Req() request: SessionRequest, @Body() body: CartInput) {
     return this.shop.createCart(request.user_data, body);
   }
 
   @Role(0)
   @Post('update-cart')
   @HttpCode(200)
-  updateCart(@Req() request: any, @Body() body: any) {
+  updateCart(@Req() request: SessionRequest, @Body() body: CartInput) {
     return this.shop.updateCart(request.user_data, body);
   }
 
   @Role(0)
   @Get('get-cart')
-  cart(@Req() request: any) {
+  cart(@Req() request: SessionRequest) {
     return this.shop.cart(request.user_data);
   }
 
   @Role(0)
   @Get('get-last-order')
-  lastOrder(@Req() request: any) {
+  lastOrder(@Req() request: SessionRequest) {
     return this.shop.lastOrder(request.user_data);
   }
 
   @Role(0)
   @Post('checkout')
   @HttpCode(200)
-  checkout(@Req() request: any, @Body() body: any) {
+  checkout(@Req() request: SessionRequest, @Body() body: CheckoutInput) {
     return this.shop.checkout(request.user_data, body);
   }
 }

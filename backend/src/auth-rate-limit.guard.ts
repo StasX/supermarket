@@ -1,3 +1,4 @@
+import { SessionRequest, CookieResponse } from './contracts';
 import { CanActivate, ExecutionContext, HttpException, Injectable } from '@nestjs/common';
 
 const WINDOW_MS = 15 * 60 * 1000;
@@ -9,8 +10,8 @@ export class AuthRateLimitGuard implements CanActivate {
 
   canActivate(context: ExecutionContext) {
     const http = context.switchToHttp();
-    const request = http.getRequest();
-    const response = http.getResponse();
+    const request = http.getRequest<SessionRequest>();
+    const response = http.getResponse<CookieResponse>();
     const now = Date.now();
     // Use the peer address, never untrusted forwarding headers.
     const key = `${context.getHandler().name}:${request.socket.remoteAddress}`;

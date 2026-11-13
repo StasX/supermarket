@@ -9,7 +9,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "esModuleInterop": true,
-    "noImplicitAny": true,
+    "strict": true,
     "noPropertyAccessFromIndexSignature": true,
     "skipLibCheck": true
   },

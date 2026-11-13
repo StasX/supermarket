@@ -1,50 +1,64 @@
+import { LoginInput, SignupInput, CookieResponse, record } from './contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compare, hash } from 'bcryptjs';
-import { MODELS } from './database.module';
-const jwt = require('jsonwebtoken');
+import { MODELS, DatabaseModels } from './database.module';
+// Keep the untyped CommonJS dependency behind the operations used here.
+const jwt = require('jsonwebtoken') as {
+  verify(token: string, key: Buffer, options: { algorithms: string[] }): unknown;
+  sign(
+    payload: { returning: boolean },
+    key: Buffer,
+    options: { subject: string; expiresIn: string; algorithm: string },
+  ): string;
+};
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(MODELS) private readonly models: any) {}
+  constructor(@Inject(MODELS) private readonly models: DatabaseModels) {}
 
   private key() {
     return readFileSync(process.env['JWT_KEY_PATH'] || join(__dirname, '..', 'src', 'key.pem'));
   }
 
-  async authenticate(token?: string) {
-    if (!token) {
+  async authenticate(token?: unknown) {
+    if (typeof token !== 'string' || !token) {
       return null;
     }
     try {
-      const payload = jwt.verify(token, this.key(), { algorithms: ['HS256'] });
+      const payload = record(jwt.verify(token, this.key(), { algorithms: ['HS256'] }) as unknown);
       // Accept existing sessions during the migration, but issue minimal new tokens.
-      let query;
-      if (payload.sub) {
-        query = { _id: payload.sub };
+      let user;
+      if (typeof payload['sub'] === 'string') {
+        user = await this.models.users.findOne({ _id: payload['sub'] });
       } else {
-        const legacyUser = JSON.parse(payload.data);
-        query = {
-          _id: legacyUser._id,
-          username: legacyUser.username,
-          password: legacyUser.password,
-        };
+        if (typeof payload['data'] !== 'string') return null;
+        const legacyUser = record(JSON.parse(payload['data']) as unknown);
+        const id = legacyUser['_id'];
+        const username = legacyUser['username'];
+        const password = legacyUser['password'];
+        if (
+          typeof id !== 'string' ||
+          typeof username !== 'string' ||
+          (password !== undefined && typeof password !== 'string')
+        )
+          return null;
+        user = await this.models.users.findOne({ _id: id, username, password });
       }
-      const user = await this.models.users.findOne(query);
       if (!user) {
         return null;
       }
       return {
         ...(user.toObject?.() ?? user),
-        isReturning: typeof payload.returning === 'boolean' ? payload.returning : true,
+        isReturning: typeof payload['returning'] === 'boolean' ? payload['returning'] : true,
       };
     } catch {
       return null;
     }
   }
 
-  async login(body: any, response: any) {
+  async login(body: LoginInput, response: CookieResponse) {
     if (!email(body.username) || typeof body.password !== 'string' || body.password.length < 8) {
       return { success: false };
     }
@@ -82,10 +96,13 @@ export class AuthService {
     };
   }
 
-  async signup(body: any) {
+  async signup(body: SignupInput) {
     const name = /^(([A-Z][a-z]+)(((\s)[A-Z]([a-z])+)+)*)$/;
     const street = /^(([A-Z0-9][a-z0-9]+)(((\s)[A-Z0-9]([a-z0-9])+)+)*)$/;
     if (
+      typeof body.firstName !== 'string' ||
+      typeof body.lastName !== 'string' ||
+      typeof body.city !== 'string' ||
       ![body.firstName, body.lastName, body.city].every(
         (value) => typeof value === 'string' && name.test(value),
       ) ||
@@ -103,7 +120,7 @@ export class AuthService {
     }
     try {
       await this.models.users.create({
-        id: body.id,
+        id: Number(body.id),
         name: { first_name: body.firstName, last_name: body.lastName },
         username: body.email,
         password: await hash(body.pass, 12),
@@ -118,6 +135,6 @@ export class AuthService {
   }
 }
 
-function email(value: unknown): boolean {
+function email(value: unknown): value is string {
   return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }

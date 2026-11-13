@@ -1,3 +1,4 @@
+import { SessionRequest } from './contracts';
 import {
   CanActivate,
   ExecutionContext,
@@ -22,7 +23,7 @@ export class SessionGuard implements CanActivate {
     if (this.reflector.get('public', context.getHandler())) {
       return true;
     }
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<SessionRequest>();
     const user = await this.auth.authenticate(request.cookies?.SESSIONID);
     const role = this.reflector.get('role', context.getHandler());
     if (!user || (role !== undefined && user.role !== role)) {

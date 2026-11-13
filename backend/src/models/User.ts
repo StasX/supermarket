@@ -1,6 +1,7 @@
+import type { UserRecord } from '../contracts';
 import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
-const User = new Schema({
+const User = new Schema<UserRecord>({
   id: {
     type: Number,
     unique: true,

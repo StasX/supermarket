@@ -1,6 +1,7 @@
+import type { CartRecord } from '../contracts';
 import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
-const cartSchema = new Schema({
+const cartSchema = new Schema<CartRecord>({
   user_id: Number,
   products: [],
   created_at: Date,

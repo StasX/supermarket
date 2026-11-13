@@ -803,7 +803,7 @@ test('admin can add a valid product', async () => {
   expect(
     (await api().post('/add-product').set('Cookie', cookie(admin)).send(body).expect(200)).body,
   ).toEqual({ success: true });
-  expect(models.products.create).toHaveBeenCalledWith(body);
+  expect(models.products.create).toHaveBeenCalledWith({ ...body, price: Number(body.price) });
 });
 
 test('admin can edit a product', async () => {
