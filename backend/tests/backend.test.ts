@@ -252,6 +252,7 @@ beforeEach(() => {
   images.clear();
   invoiceWrite.mockImplementation(async (id: string, bytes: Buffer) => { if (!images.has(`invoices/${id}.pdf`)) images.set(`invoices/${id}.pdf`, bytes); });
   models.users.findOne.mockImplementation(async query => query._id === admin._id ? admin : query._id === customer._id ? customer : null);
+  models.users.findOneAndUpdate.mockResolvedValue(customer);
   models.products.find.mockResolvedValue([]);
 });
 
@@ -368,11 +369,22 @@ for (const [method, route, allowedRole] of [
 test('login sets an HTTP-only cookie without exposing the password hash in its payload', async () => {
   models.users.findOne.mockResolvedValue({ ...customer, password: await bcrypt.hash('password123', 4) });
   const result = await api().post('/login').send({ username: customer.username, password: 'password123' }).expect(200);
-  expect(result.body).toEqual({ success: true, role: 0, name: 'John Smith', user: customer._id });
+  expect(result.body).toEqual({ success: true, role: 0, name: 'John Smith', user: customer._id, isReturning: true });
   expect(result.headers['set-cookie'][0]).toContain('HttpOnly');
   const token = result.headers['set-cookie'][0].split(';')[0].slice('SESSIONID='.length);
   expect(jwt.verify(token, key)).toMatchObject({ sub: customer._id });
   expect(jwt.decode(token)).not.toHaveProperty('data');
+});
+
+test.each([false, true, undefined])('login distinguishes first and returning sessions and preserves the greeting on reconnect (%s)', async hasLoggedIn => {
+  models.users.findOne.mockResolvedValue({ ...customer, password: await bcrypt.hash('password123', 4) });
+  models.users.findOneAndUpdate.mockResolvedValue({ ...customer, has_logged_in: hasLoggedIn });
+  const login = await api().post('/login').send({ username: customer.username, password: 'password123' }).expect(200);
+  expect(login.body.isReturning).toBe(hasLoggedIn !== false);
+  expect(models.users.findOneAndUpdate).toHaveBeenCalledWith({ _id: customer._id }, { $set: { has_logged_in: true } }, { returnDocument: 'before' });
+  const sessionCookie = login.headers['set-cookie'][0].split(';')[0];
+  const reconnect = await api().get('/reconect').set('Cookie', sessionCookie).expect(200);
+  expect(reconnect.body.isReturning).toBe(hasLoggedIn !== false);
 });
 
 test('login rejects incorrect credentials and invalid input', async () => {
@@ -390,6 +402,7 @@ test('signup hashes the password and forces the customer role', async () => {
   expect(result.body).toEqual({ created: true });
   const saved = models.users.create.mock.calls[0][0];
   expect(saved.role).toBe(0);
+  expect(saved.has_logged_in).toBe(false);
   expect(await bcrypt.compare('password123', saved.password)).toBe(true);
 });
 
@@ -400,7 +413,7 @@ test('signup rejects invalid input without writing to the database', async () =>
 
 test('reconnect preserves the existing response shape', async () => {
   expect((await api().get('/reconect').set('Cookie', cookie()).expect(200)).body).toEqual({
-    success: true, role: 0, name: customer.name, user: customer._id,
+    success: true, role: 0, name: customer.name, user: customer._id, isReturning: true,
   });
 });
 
@@ -441,6 +454,7 @@ test('creates and retrieves an open cart using the existing user id', async () =
   models.carts.findOne.mockResolvedValue({ _id: 'cart1', products: [], created_at: '2026-01-01' });
   expect((await api().get('/get-cart').set('Cookie', cookie()).expect(200)).body).toEqual({ success: true, cart: { id: 'cart1', products: [], created: '2026-01-01' } });
 });
+
 
 test('a concurrent duplicate cart insert returns the normal failure response', async () => {
   const { MongoServerError } = require('mongoose').mongo;

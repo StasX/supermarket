@@ -113,6 +113,7 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
         const login = await request('/login', { method: 'POST', body: { username, password } });
         assert.equal(login.body.success, true);
         assert.equal(login.body.role, role);
+        assert.equal(login.body.isReturning, role !== 0);
         assert.ok(login.cookie, 'Login must set a session cookie');
         assert.match(login.cookie, /HttpOnly/i);
         const cookie = login.cookie.split(';')[0];
@@ -121,7 +122,17 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
         const session = await request('/reconect', { cookie });
         assert.equal(session.body.user, login.body.user);
         assert.equal(session.body.role, role);
+        assert.equal(session.body.isReturning, login.body.isReturning);
     }
+});
+
+test('a second login is recognized without any prior purchases', async () => {
+    assert.equal(await Order.countDocuments({ user_id: Number(registration.id) }), 0);
+    assert.equal((await User.findOne({ username: registration.email })).has_logged_in, true);
+    const login = await request('/login', { method: 'POST', body: { username: registration.email, password } });
+    assert.equal(login.body.isReturning, true);
+    customerCookie = login.cookie!.split(';')[0];
+    assert.equal((await request('/reconect', { cookie: customerCookie })).body.isReturning, true);
 });
 
 test('admin product writes persist, validate input, and enforce customer permissions', async () => {

@@ -14,6 +14,7 @@ import { AppComponent } from './app.component';
 import { LoginPage, SignupPage } from './auth.pages';
 import { ManagementPage } from './store.pages';
 import { CheckoutPage } from './checkout.page';
+import { CustomerWelcome } from './customer.pages';
 import { emailPattern, passwordsMatch, priceValidator } from './validators';
 
 const customer = { user: 'u1', name: 'John Smith', role: 0 };
@@ -178,12 +179,70 @@ describe('Angular rendering and forms', () => {
     'sets the page title for %s', async (url, title) => {
       TestBed.inject(AuthService).user.set(customer); const harness = await RouterTestingHarness.create();
       await harness.navigateByUrl(url); expect(TestBed.inject(Title).getTitle()).toBe(title);
+      if (url === '/about') {
+        TestBed.inject(HttpTestingController).expectOne('/get-last-order').flush({ success: true });
+        TestBed.inject(HttpTestingController).expectOne('/get-cart').flush({ success: true });
+        TestBed.inject(HttpTestingController).expectOne('/get-all-products').flush({ success: true, products: [] });
+      }
       if (url === '/order/payment') {
         TestBed.inject(HttpTestingController).expectOne('/get-cart').flush({ success: true });
         TestBed.inject(HttpTestingController).expectOne('/get-all-products').flush({ success: true, products: [] });
       }
     },
   );
+});
+
+describe('customer welcome heading', () => {
+  it.each([false, true])('uses login history even when the customer has no orders (%s)', async isReturning => {
+    TestBed.inject(AuthService).user.set({ ...customer, isReturning });
+    const fixture = TestBed.createComponent(CustomerWelcome);
+    vi.spyOn(fixture.componentInstance.cart, 'load').mockResolvedValue(); fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne('/get-last-order').flush({ success: true });
+    await vi.waitFor(() => expect(fixture.componentInstance.loading()).toBe(false)); fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('h1').textContent).toBe(isReturning ? 'Welcome back to Dragon shop' : 'Welcome to your first buy in Dragon shop');
+  });
+  it.each([
+    [{ success: true }, 'Welcome to your first buy in Dragon shop'],
+    [{ success: true, order: { _id: 'o1' } }, 'Welcome back to Dragon shop'],
+    [{ success: false }, 'Welcome to Dragon shop'],
+  ])('uses customer order history (%j)', async (result, expected) => {
+    const fixture = TestBed.createComponent(CustomerWelcome);
+    vi.spyOn(fixture.componentInstance.cart, 'load').mockResolvedValue(); fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne('/get-last-order').flush(result);
+    await vi.waitFor(() => expect(fixture.componentInstance.loading()).toBe(false)); fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('h1').textContent).toBe(expected);
+  });
+});
+
+describe('welcome shopping summary', () => {
+  const previousOrder = { _id: 'o1', price: 18, created_at: '2026-01-01T10:00:00Z', products: [{ id: 'p1', name: 'Original juice', count: 3, price: 6 }] };
+  it.each(['full', 'empty', 'none'] as const)('shows the open cart before order history (%s)', async state => {
+    const fixture = TestBed.createComponent(CustomerWelcome); fixture.detectChanges();
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne('/get-last-order').flush({ success: true, order: previousOrder });
+    http.expectOne('/get-all-products').flush({ success: true, products: [product] });
+    http.expectOne('/get-cart').flush({ success: true, ...(state === 'none' ? {} : { cart: { id: 'c1', created: '2026-01-01T10:00:00Z', products: state === 'full' ? [{ id: 'p1', count: 2, price: 10.5 }] : [] } }) });
+    await vi.waitFor(() => expect(fixture.componentInstance.loading()).toBe(false)); fixture.detectChanges();
+    const text = fixture.nativeElement.textContent;
+    if (state === 'none') {
+      expect(text).toContain('Your latest order'); expect(text).toContain('Original juice'); expect(text).toContain('$18.00');
+      expect(text).not.toContain('Your open cart'); expect(fixture.nativeElement.querySelector('a').textContent).toBe('Start shopping');
+    } else {
+      expect(text).toContain('Your open cart'); expect(text).toContain('Created at'); expect(text).toContain('Jan 1, 2026');
+      expect(text).not.toContain('Last updated');
+      expect(text).not.toContain('Your latest order'); expect(fixture.nativeElement.querySelector('a').textContent).toBe('Continue shopping');
+      expect(text).toContain(state === 'full' ? '$21.00' : 'Your cart is empty.');
+    }
+  });
+  it('offers Start shopping when no cart or previous order exists', async () => {
+    const fixture = TestBed.createComponent(CustomerWelcome); fixture.detectChanges();
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne('/get-last-order').flush({ success: true }); http.expectOne('/get-cart').flush({ success: true });
+    http.expectOne('/get-all-products').flush({ success: true, products: [] });
+    await vi.waitFor(() => expect(fixture.componentInstance.loading()).toBe(false)); fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Welcome to your first buy in Dragon shop');
+    expect(fixture.nativeElement.querySelector('a').textContent).toBe('Start shopping');
+  });
 });
 
 describe('demo checkout', () => {

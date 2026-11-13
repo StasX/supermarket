@@ -41,7 +41,7 @@ export class ApiController {
   @Get('reconect')
   reconnect(@Req() request: any) {
     const user = request.user_data;
-    return { success: true, role: user.role, name: user.name, user: user._id, address: user.address };
+    return { success: true, role: user.role, name: user.name, user: user._id, address: user.address, isReturning: user.isReturning };
   }
 
   @Get('get-all-products')

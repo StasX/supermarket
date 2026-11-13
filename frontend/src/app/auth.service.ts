@@ -10,7 +10,7 @@ export class AuthService {
   async login(username: string, password: string) {
     const result = await this.api.login(username, password);
     if (!result.success || result.user === undefined || result.role === undefined) return false;
-    this.user.set({ user: result.user, role: result.role, name: result.name ?? '', address: result.address });
+    this.user.set({ user: result.user, role: result.role, name: result.name ?? '', address: result.address, isReturning: result.isReturning });
     return true;
   }
   async reconnect() {
@@ -19,7 +19,7 @@ export class AuthService {
     this.reconnecting = this.api.reconnect().then(result => {
       if (result.success && result.user && result.role !== undefined) {
         const name = typeof result.name === 'object' ? `${result.name.first_name} ${result.name.last_name}` : result.name ?? '';
-        this.user.set({ user: result.user, role: result.role, name, address: result.address });
+        this.user.set({ user: result.user, role: result.role, name, address: result.address, isReturning: result.isReturning });
       }
       return this.user();
     }).catch(() => null).finally(() => { this.reconnecting = undefined; });

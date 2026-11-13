@@ -22,7 +22,9 @@ export class AuthService {
         const user = JSON.parse(payload.data);
         return { _id: user._id, username: user.username, password: user.password };
       })();
-      return await this.models.users.findOne(query);
+      const user = await this.models.users.findOne(query);
+      if (!user) return null;
+      return { ...(user.toObject?.() ?? user), isReturning: typeof payload.returning === 'boolean' ? payload.returning : true };
     } catch {
       return null;
     }
@@ -32,9 +34,12 @@ export class AuthService {
     if (!email(body.username) || typeof body.password !== 'string' || body.password.length < 8) return { success: false };
     const user = await this.models.users.findOne({ username: body.username });
     if (!user || !(await compare(body.password, user.password))) return { success: false };
-    const token = jwt.sign({}, this.key(), { subject: String(user._id), expiresIn: '9h', algorithm: 'HS256' });
+    const previous = await this.models.users.findOneAndUpdate({ _id: user._id }, { $set: { has_logged_in: true } }, { returnDocument: 'before' });
+    if (!previous) return { success: false };
+    const isReturning = previous.has_logged_in !== false;
+    const token = jwt.sign({ returning: isReturning }, this.key(), { subject: String(user._id), expiresIn: '9h', algorithm: 'HS256' });
     response.cookie('SESSIONID', token, { httpOnly: true, secure: false, sameSite: 'lax', path: '/' });
-    return { success: true, role: user.role, name: `${user.name.first_name} ${user.name.last_name}`, user: user._id, address: user.address };
+    return { success: true, role: user.role, name: `${user.name.first_name} ${user.name.last_name}`, user: user._id, address: user.address, isReturning };
   }
 
   async signup(body: any) {
@@ -50,7 +55,7 @@ export class AuthService {
       await this.models.users.create({
         id: body.id, name: { first_name: body.firstName, last_name: body.lastName },
         username: body.email, password: await hash(body.pass, 12),
-        address: { city: body.city, street: body.street }, role: 0,
+        address: { city: body.city, street: body.street }, role: 0, has_logged_in: false,
       });
       return { created: true };
     } catch {

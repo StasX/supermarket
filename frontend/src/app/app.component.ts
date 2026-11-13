@@ -14,11 +14,7 @@ import { CartService } from './cart.service';
       </a>
       <nav aria-label="Main navigation">
         @if (auth.user(); as user) {
-          @if (user.role === 0) {
-            <a routerLink="/store" routerLinkActive="active">Store</a>
-            <a routerLink="/info" routerLinkActive="active">Shop info</a>
-            <a routerLink="/about" routerLinkActive="active">About</a>
-          } @else { <a routerLink="/management" routerLinkActive="active">Manage products</a> }
+          @if (user.role !== 0) { <a routerLink="/management" routerLinkActive="active">Manage products</a> }
           <span class="user-chip"><span class="avatar" aria-hidden="true">{{ user.name.charAt(0) }}</span>{{ user.name }}</span>
           <button class="secondary signout" type="button" (click)="logout()" [disabled]="busy()">Sign out</button>
         } @else { <a routerLink="/login" routerLinkActive="active">Sign in</a><a class="button signup-link" routerLink="/sign-up">Join the market <span aria-hidden="true">↗</span></a> }
@@ -26,7 +22,7 @@ import { CartService } from './cart.service';
     </header>
     @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
     <main><router-outlet /></main>
-    <footer><a class="footer-brand" routerLink="/login"><img src="assets/img/logo.png" alt="">dragonshop.</a><span>Good ingredients. Everyday inspiration.</span><span>Make yourself at home.</span></footer>
+    <footer><a class="footer-brand" [routerLink]="auth.user() ? '/store' : '/login'"><img src="assets/img/logo.png" alt="">dragonshop.</a><span>Good ingredients. Everyday inspiration.</span><span>Make yourself at home.</span></footer>
   `,
 })
 export class AppComponent {

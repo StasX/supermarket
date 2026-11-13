@@ -24,6 +24,8 @@ const User = new Schema({
         city : String,
         street : String
     },
+    // Existing accounts are returning customers; signup marks new accounts explicitly.
+    has_logged_in: { type: Boolean, default: true },
     role : {
         type : Number,
         default : 0 /* 0: regular user, 1: administrator */

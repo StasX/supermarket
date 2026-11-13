@@ -76,7 +76,7 @@ export class LoginPage {
         </form>
       }
       @if (error()) {<p class="error" role="alert">{{ error() }}</p>}
-      <p><a routerLink="/login">Back to sign in</a></p>
+      <p><a class="return-link" routerLink="/login">Back to sign in</a></p>
     </section></div>
   `,
 })
