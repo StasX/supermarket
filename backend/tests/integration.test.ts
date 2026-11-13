@@ -12,7 +12,7 @@ import * as net from 'node:net';
 import { once } from 'node:events';
 import mongoose from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 const { createStorageClient } = require('../dist/image-storage.service');
 const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
@@ -214,6 +214,41 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
     const repeated = await request('/checkout', { method: 'POST', cookie: customerCookie, body });
     assert.equal(repeated.body.order.id, String(order._id));
     assert.equal((await request('/create-cart', { method: 'POST', cookie: customerCookie, body: { products: [] } })).body.success, true);
+});
+
+test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ownership', async () => {
+    const order = await Order.findOne({ user_id: Number(registration.id), 'payment.mode': 'demo' }).lean();
+    const url = `/orders/${order._id}/invoice`;
+    assert.equal(order.invoiceKey, `invoices/${order._id}.pdf`);
+    assert.equal(order.products[0].name, 'Test Milk');
+    const download = await fetch(base + url, { headers: { Cookie: customerCookie } });
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get('content-type'), 'application/pdf');
+    assert.match(download.headers.get('content-disposition')!, /attachment; filename="invoice-.*\.pdf"/);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    assert.match(bytes.toString(), /^%PDF-/);
+    assert.ok(bytes.includes(Buffer.from('Test Milk')));
+    assert.ok(bytes.includes(Buffer.from('$5.25')));
+    const client = createStorageClient();
+    try {
+        const stored = await client.send(new GetObjectCommand({ Bucket: process.env['S3_BUCKET'] || 'product-images', Key: order.invoiceKey }));
+        assert.equal(stored.ContentType, 'application/pdf');
+        assert.deepEqual(Buffer.from(await stored.Body.transformToByteArray()), bytes);
+        // Subsequent catalog changes must not alter the PDF or its saved line names/prices.
+        await Product.updateOne({ _id: order.products[0].id }, { $set: { name: 'Changed after checkout', price: 99 } });
+        const second = await fetch(base + url, { headers: { Cookie: customerCookie } });
+        assert.deepEqual(Buffer.from(await second.arrayBuffer()), bytes);
+        const head = await client.send(new HeadObjectCommand({ Bucket: process.env['S3_BUCKET'] || 'product-images', Key: order.invoiceKey }));
+        assert.equal(head.ETag, stored.ETag);
+    } finally { client.destroy(); }
+    assert.deepEqual((await request(url)).body, { success: false });
+    assert.deepEqual((await request(url, { cookie: adminCookie })).body, { success: false });
+    await request('/sign-up', { method: 'POST', body: { ...registration, id: '222333444', email: 'other@example.com' } });
+    const login = await request('/login', { method: 'POST', body: { username: 'other@example.com', password } });
+    const denied = await fetch(base + url, { headers: { Cookie: login.cookie!.split(';')[0] } });
+    assert.equal(denied.status, 404);
+    const publicAttempt = await fetch(base + `/products/uploads/invoices/${order._id}.pdf`);
+    assert.equal(publicAttempt.status, 404);
 });
 
 test('administrator uploads persist in MinIO and are publicly served by the app', async () => {

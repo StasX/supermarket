@@ -18,7 +18,9 @@ import { NotFoundException } from '@nestjs/common';
 const { AppModule } = require('../dist/app.module');
 const { MODELS } = require('../dist/database.module');
 const { ImageStorageService } = require('../dist/image-storage.service');
+const { createInvoice } = require('../dist/invoice');
 const images = new Map<string, Buffer>();
+const invoiceWrite = jest.fn<(...args: any[]) => Promise<void>>();
 
 const customer = { _id: '507f1f77bcf86cd799439011', id: 123456789, username: 'buyer@example.com',
   name: { first_name: 'John', last_name: 'Smith' }, role: 0 };
@@ -45,25 +47,30 @@ test.each([
   { ...checkoutBody, shipping: { ...checkoutBody.shipping, city: ' ' } },
   { ...checkoutBody, shipping: { ...checkoutBody.shipping, date: '2000-01-01' } },
   { ...checkoutBody, shipping: { ...checkoutBody.shipping, date: '2099-02-30' } },
-  { ...checkoutBody, payment: { method: 'credit_card', last4: '1234' } },
+  { ...checkoutBody, payment: { method: 'credit_card', last4: '123' } },
   { ...checkoutBody, payment: { ...checkoutBody.payment, number: '4242424242424242', cvc: '123' } },
 ])('checkout rejects invalid shipping or payment data (%j)', async body => {
   expect((await api().post('/checkout').set('Cookie', cookie()).send(body)).body.success).toBe(false);
   expect(models.carts.findOne).not.toHaveBeenCalled();
 });
 
-test('checkout uses catalog prices and persists only demo payment metadata', async () => {
+test.each(['4242', '5800', '0000'])('checkout uses catalog prices and persists only demo payment metadata (%s)', async last4 => {
   const products = [{ id: admin._id, count: 2, price: 0.01 }];
   models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
-  models.products.find.mockResolvedValue([{ _id: admin._id, price: 5.25 }]);
+  models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Apple juice', price: 5.25 }]);
   models.carts.findOneAndUpdate.mockImplementation(async (_query, update) => ({ status: 0, checkout: update.$set.checkout }));
   models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => ({ _id: 'order1', ...update.$setOnInsert }));
-  const response = await api().post('/checkout').set('Cookie', cookie()).send({ ...checkoutBody, total: 0.01 });
-  expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 10.5, payment: { mode: 'demo', last4: '4242' } } });
+  const response = await api().post('/checkout').set('Cookie', cookie()).send({ ...checkoutBody, payment: { method: 'credit_card', last4 }, total: 0.01 });
+  expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 10.5, payment: { mode: 'demo', last4 } } });
   const saved = models.orders.findOneAndUpdate.mock.calls[0][1].$setOnInsert;
-  expect(saved.products).toEqual([{ id: admin._id, count: 2, price: 5.25 }]);
+  expect(saved.products).toEqual([{ id: admin._id, name: 'Apple juice', count: 2, price: 5.25 }]);
+  expect(response.body.order.invoiceUrl).toBe('/orders/order1/invoice');
+  const invoice = images.get('invoices/order1.pdf')!;
+  expect(invoice.toString()).toMatch(/^%PDF-/);
+  expect(invoice.toString()).toContain('Apple juice');
+  expect(invoice.toString()).toContain('$5.25');
   expect(saved).not.toHaveProperty('credit_card');
-  expect(saved.payment).toEqual({ mode: 'demo', method: 'credit_card', last4: '4242' });
+  expect(saved.payment).toEqual({ mode: 'demo', method: 'credit_card', last4 });
   expect(models.carts.findOneAndUpdate.mock.calls[0][0]).toMatchObject({ _id: customer._id, user_id: customer.id, status: 1, products });
 });
 
@@ -86,18 +93,82 @@ test('checkout retries a closed cart using its original snapshot', async () => {
   expect(models.orders.findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: snapshot });
 });
 
+test('PDF invoices include the review table, frozen line prices and shipping details', () => {
+  const order = { _id: customer._id, price: 7.5, products: [{ id: admin._id, name: 'Apple juice', count: 3, price: 2.5 }],
+    shipping: { city: 'Jerusalem', street: 'Jafo', date: new Date('2026-12-12') }, payment: { last4: '4848' } };
+  const content = createInvoice(order).toString();
+  expect(content).toMatch(/^%PDF-/);
+  expect(content).toContain('/Subtype /Image');
+  for (const text of ['PRODUCT', 'QUANTITY', 'PRICE', 'TOTAL', 'Apple juice', '$2.50', 'Total: $7.50', customer._id, 'Jafo, Jerusalem', '2026-12-12', '4848']) {
+    expect(content).toContain(text);
+  }
+  const large = createInvoice({ ...order, products: Array.from({ length: 90 }, () => order.products[0]) }).toString();
+  expect(large.match(/\/Type \/Page\b/g).length).toBeGreaterThan(1);
+  expect(large.match(/\(PRODUCT\)/g).length).toBeGreaterThan(1);
+});
+
+test.each([null, admin])('invoice downloads require a customer session (%s)', async user => {
+  const call = api().get(`/orders/${customer._id}/invoice`);
+  if (user) call.set('Cookie', cookie(user));
+  expect((await call.expect(200)).body).toEqual({ success: false });
+  expect(models.orders.findOne).not.toHaveBeenCalled();
+});
+
+test.each(['invalid', customer._id])('missing or another customer invoice is not disclosed (%s)', async id => {
+  models.orders.findOne.mockResolvedValue(null);
+  await api().get(`/orders/${id}/invoice`).set('Cookie', cookie()).expect(404);
+  if (id === customer._id) expect(models.orders.findOne).toHaveBeenCalledWith({ _id: id, user_id: customer.id, 'payment.mode': 'demo' });
+  expect(invoiceWrite).not.toHaveBeenCalled();
+});
+
+test('invoice downloads return the stored PDF without regeneration or catalog queries', async () => {
+  const bytes = Buffer.from('%PDF-1.3\noriginal persisted invoice');
+  const invoiceKey = `invoices/${customer._id}.pdf`;
+  images.set(invoiceKey, bytes);
+  models.orders.findOne.mockResolvedValue({ _id: customer._id, user_id: customer.id, invoiceKey });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await api().get(`/orders/${customer._id}/invoice`).set('Cookie', cookie()).expect(200).expect('Content-Type', /application\/pdf/);
+    expect(response.body).toEqual(bytes);
+    expect(response.headers['content-disposition']).toBe(`attachment; filename="invoice-${customer._id}.pdf"`);
+    expect(response.headers['cache-control']).toBe('private, no-store');
+  }
+  expect(invoiceWrite).not.toHaveBeenCalled();
+  expect(models.products.find).not.toHaveBeenCalled();
+});
+
+test('checkout recovers from invoice storage failure without creating another order or closing another cart', async () => {
+  const snapshot = { user_id: customer.id, price: 12, products: [{ id: admin._id, name: 'Frozen product name', count: 2, price: 6 }], shipping: checkoutBody.shipping, payment: { mode: 'demo', method: 'credit_card', last4: '4242' } };
+  models.carts.findOne.mockResolvedValue({ status: 0, checkout: snapshot });
+  models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => ({ _id: customer._id, ...update.$setOnInsert }));
+  invoiceWrite.mockRejectedValueOnce(new Error('Object storage temporarily unavailable'));
+  await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody).expect(500);
+  const retried = await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody).expect(200);
+  expect(retried.body.order.invoiceUrl).toBe(`/orders/${customer._id}/invoice`);
+  expect(images.get(`invoices/${customer._id}.pdf`)!.toString()).toContain('Frozen product name');
+  expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(models.products.find).not.toHaveBeenCalled();
+  expect(models.orders.findOneAndUpdate).toHaveBeenLastCalledWith({ _id: customer._id }, { $set: { invoiceKey: `invoices/${customer._id}.pdf` } });
+});
+
 test('S3 storage signs path-style requests, preserves image bytes, and maps missing objects to 404', async () => {
   const keys = ['S3_ENDPOINT', 'S3_FORCE_PATH_STYLE', 'S3_BUCKET', 'S3_CREATE_BUCKET', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];
   const previous = keys.map(key => process.env[key]);
   const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const received: { method?: string; url?: string; authorization?: string; body: Buffer }[] = [];
+  let storedInvoice: Buffer | undefined;
+  const received: { method?: string; url?: string; authorization?: string; ifNoneMatch?: string; body: Buffer }[] = [];
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    received.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: Buffer.concat(chunks) });
+    received.push({ method: req.method, url: req.url, authorization: req.headers.authorization, ifNoneMatch: req.headers['if-none-match'], body: Buffer.concat(chunks) });
     if (req.url?.includes('missing')) {
       res.writeHead(404, { 'Content-Type': 'application/xml' });
       res.end('<Error><Code>NoSuchKey</Code><Message>Missing image</Message></Error>');
+    } else if (req.url?.includes('/invoices/') && req.method === 'PUT') {
+      if (storedInvoice) {
+        res.writeHead(412, { 'Content-Type': 'application/xml' }); res.end('<Error><Code>PreconditionFailed</Code></Error>');
+      } else { storedInvoice = Buffer.concat(chunks); res.writeHead(200); res.end(); }
+    } else if (req.url?.includes('/invoices/') && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/pdf' }); res.end(storedInvoice);
     } else if (req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(bytes);
     } else { res.writeHead(200); res.end(); }
@@ -119,6 +190,15 @@ test('S3 storage signs path-style requests, preserves image bytes, and maps miss
     expect(Buffer.concat(downloaded)).toEqual(bytes);
     await expect(storage.get('missing.png')).rejects.toBeInstanceOf(NotFoundException);
     await expect(storage.get('../unsafe.png')).rejects.toBeInstanceOf(NotFoundException);
+    const pdf = Buffer.from('%PDF-original');
+    await storage.putInvoice(customer._id, pdf);
+    await storage.putInvoice(customer._id, Buffer.from('%PDF-replacement'));
+    const invoiceStream = await storage.getInvoice(customer._id);
+    const invoiceChunks: Buffer[] = [];
+    for await (const chunk of invoiceStream) invoiceChunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(invoiceChunks)).toEqual(pdf);
+    expect(received.filter(item => item.method === 'PUT' && item.url?.includes('/invoices/')).every(item => item.ifNoneMatch === '*')).toBe(true);
+    await expect(storage.get(`invoices/${customer._id}.pdf`)).rejects.toBeInstanceOf(NotFoundException);
     expect(received[0].method).toBe('HEAD');
     const upload = received.find(item => item.method === 'PUT');
     if (!upload) throw new Error('S3 upload request was not received');
@@ -148,6 +228,12 @@ beforeAll(async () => {
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(MODELS).useValue(models)
     .overrideProvider(ImageStorageService).useValue({
+      putInvoice: (id: string, bytes: Buffer) => invoiceWrite(id, bytes),
+      getInvoice: async (id: string) => {
+        const bytes = images.get(`invoices/${id}.pdf`);
+        if (!bytes) throw new NotFoundException();
+        return Readable.from(bytes);
+      },
       put: async (filename: string, bytes: Buffer) => { images.set(filename, bytes); },
       get: async (filename: string) => {
         const bytes = images.get(filename);
@@ -164,6 +250,7 @@ beforeAll(async () => {
 beforeEach(() => {
   jest.resetAllMocks();
   images.clear();
+  invoiceWrite.mockImplementation(async (id: string, bytes: Buffer) => { if (!images.has(`invoices/${id}.pdf`)) images.set(`invoices/${id}.pdf`, bytes); });
   models.users.findOne.mockImplementation(async query => query._id === admin._id ? admin : query._id === customer._id ? customer : null);
   models.products.find.mockResolvedValue([]);
 });

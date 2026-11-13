@@ -1,4 +1,6 @@
 {
+  "/orders/**": { "target": "http://localhost:3000" },
+  "/checkout": { "target": "http://localhost:3000" },
   "/upload-product-image": { "target": "http://localhost:3000" },
   "/products/**": { "target": "http://localhost:3000" },
   "/login": { "target": "http://localhost:3000" }, "/sign-up": { "target": "http://localhost:3000" },

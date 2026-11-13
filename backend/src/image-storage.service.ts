@@ -38,8 +38,27 @@ export class ImageStorageService implements OnModuleInit, OnModuleDestroy {
 
   async get(filename: string) {
     if (!/^[a-f0-9-]+\.(png|jpg|webp)$/.test(filename)) throw new NotFoundException();
+    return this.getObject(filename);
+  }
+
+  async putInvoice(id: string, bytes: Buffer) {
     try {
-      const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: filename }));
+      await this.client.send(new PutObjectCommand({
+        Bucket: this.bucket, Key: `invoices/${id}.pdf`, Body: bytes,
+        ContentType: 'application/pdf', IfNoneMatch: '*',
+      }));
+    } catch (error) {
+      if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 412) throw error;
+    }
+  }
+
+  async getInvoice(id: string) {
+    return this.getObject(`invoices/${id}.pdf`);
+  }
+
+  private async getObject(key: string) {
+    try {
+      const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
       if (!(result.Body instanceof Readable)) throw new Error('Object storage returned no readable image body');
       return result.Body;
     } catch (error) {

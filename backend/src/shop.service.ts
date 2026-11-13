@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS } from './database.module';
+import { InvoiceService } from './invoice.service';
 
 const categories = ['Milk & Eggs', 'Vegetables & Fruits', 'Meet & Fish', 'Wine & Drinks'];
 const validId = (id: unknown) => typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
@@ -15,7 +16,7 @@ interface ProductRecord {
 
 @Injectable()
 export class ShopService {
-  constructor(@Inject(MODELS) private readonly models: any) {}
+  constructor(@Inject(MODELS) private readonly models: any, private readonly invoices: InvoiceService) {}
 
   async products() {
     const products: ProductRecord[] = await this.models.products.find({});
@@ -76,7 +77,7 @@ export class ShopService {
     return cart ? { success: true, products } : { success: false };
   }
 
-  private async cartProducts(input: unknown) {
+  private async cartProducts(input: unknown, includeNames = false) {
     if (!Array.isArray(input)) return null;
     const ids = new Set<string>();
     for (const item of input) {
@@ -88,12 +89,13 @@ export class ShopService {
     if (!input.length) return [];
     const catalog: ProductRecord[] = await this.models.products.find({ _id: { $in: [...ids] } });
     const prices = new Map(catalog.map(product => [String(product._id), product.price]));
-    const products: { id: string; count: number; price: number }[] = [];
+    const products: { id: string; count: number; price: number; name?: string }[] = [];
+    const names = new Map(catalog.map(product => [String(product._id), product.name]));
     for (const item of input) {
       const id = item.id.toLowerCase();
       const price = prices.get(id);
       if (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * item.count)) return null;
-      products.push({ id, count: item.count, price });
+      products.push({ id, count: item.count, price, ...(includeNames ? { name: names.get(id) || 'Unavailable product' } : {}) });
     }
     return products;
   }
@@ -119,20 +121,20 @@ export class ShopService {
     const date = typeof shipping.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(shipping.date) ? new Date(`${shipping.date}T00:00:00Z`) : new Date(NaN);
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== shipping.date || shipping.date < today) return fail('Choose today or a future shipping date.');
-    // Demo payments accept only the documented test card marker, never card numbers or CVC.
-    if (body.payment?.method !== 'credit_card' || body.payment?.last4 !== '4242' ||
+    // Demo payments accept only last-four metadata, never card numbers or CVC.
+    if (body.payment?.method !== 'credit_card' || typeof body.payment?.last4 !== 'string' || !/^[0-9]{4}$/.test(body.payment.last4) ||
       Object.keys(body.payment).some(key => !['method', 'last4'].includes(key))) return fail('Use the demo credit card. No charge will be made.');
     let cart = await this.models.carts.findOne({ _id: cartId, user_id: user.id });
     if (!cart) return fail('Cart not found.');
     if (cart.status === 1) {
-      const products = await this.cartProducts(cart.products);
+      const products = await this.cartProducts(cart.products, true);
       if (!products?.length) return fail('Add available products before checking out.');
       const cents = products.reduce((sum, item) => sum + Math.round(item.price * 100) * item.count, 0);
       if (!Number.isSafeInteger(cents)) return fail('The order total is too large.');
       const snapshot = {
         user_id: user.id, username: user.username, cart_id: String(cart._id), products, price: cents / 100,
         shipping: { city: shipping.city.trim(), street: shipping.street.trim(), date },
-        payment: { mode: 'demo', method: 'credit_card', last4: '4242' }, created_at: new Date(),
+        payment: { mode: 'demo', method: 'credit_card', last4: body.payment.last4 }, created_at: new Date(),
       };
       // Persist the order snapshot and close the cart atomically. Matching products
       // prevents checkout racing with a cart edit. The snapshot supports safe retries.
@@ -151,6 +153,7 @@ export class ShopService {
       if (!(error instanceof mongoose.mongo.MongoServerError) || error.code !== 11000) throw error;
       order = await this.models.orders.findOne(query);
     }
-    return { success: true, order: { id: order._id, total: order.price, shipping: order.shipping, payment: order.payment } };
+    const invoiceUrl = await this.invoices.ensure(order);
+    return { success: true, order: { id: order._id, total: order.price, products: order.products, shipping: order.shipping, payment: order.payment, invoiceUrl } };
   }
 }

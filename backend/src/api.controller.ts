@@ -4,12 +4,20 @@ import { randomUUID } from 'node:crypto';
 import { ImageStorageService } from './image-storage.service';
 import { AuthService } from './auth.service';
 import { ShopService } from './shop.service';
+import { InvoiceService } from './invoice.service';
 import { Public, Role, SessionGuard } from './session.guard';
 
 @Controller()
 @UseGuards(SessionGuard)
 export class ApiController {
-  constructor(private readonly auth: AuthService, private readonly shop: ShopService, private readonly images: ImageStorageService) {}
+  constructor(private readonly auth: AuthService, private readonly shop: ShopService, private readonly images: ImageStorageService, private readonly invoices: InvoiceService) {}
+
+  @Role(0) @Get('orders/:id/invoice')
+  async invoice(@Req() request: any, @Param('id') id: string, @Res({ passthrough: true }) response: any) {
+    const stream = await this.invoices.download(request.user_data, id);
+    response.setHeader('Cache-Control', 'private, no-store');
+    return new StreamableFile(stream, { type: 'application/pdf', disposition: `attachment; filename="invoice-${id}.pdf"` });
+  }
 
   @Public() @Get('products/uploads/:filename')
   async productImage(@Param('filename') filename: string) {
@@ -33,7 +41,7 @@ export class ApiController {
   @Get('reconect')
   reconnect(@Req() request: any) {
     const user = request.user_data;
-    return { success: true, role: user.role, name: user.name, user: user._id };
+    return { success: true, role: user.role, name: user.name, user: user._id, address: user.address };
   }
 
   @Get('get-all-products')

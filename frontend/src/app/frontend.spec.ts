@@ -5,7 +5,7 @@ import { ActivatedRouteSnapshot, provideRouter, Router, RouterStateSnapshot, Url
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { Title } from '@angular/platform-browser';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ApiService, Product } from './api.service';
 import { AuthService, sessionGuard } from './auth.service';
 import { CartService } from './cart.service';
@@ -187,21 +187,58 @@ describe('Angular rendering and forms', () => {
 });
 
 describe('demo checkout', () => {
-  function setup() {
+  it('fills empty profile fields on double click and preserves entered values', async () => {
+    TestBed.inject(AuthService).user.set({ ...customer, name: 'John Smith', address: { city: 'Tel Aviv', street: 'Ha Masger 10' } });
     const fixture = TestBed.createComponent(CheckoutPage); const page = fixture.componentInstance;
+    vi.spyOn(page.cart, 'load').mockResolvedValue();
+    page.cart.items.set([{ id: 'p1', count: 1, price: 10.5 }]);
+    await page.ngOnInit();
+    fixture.detectChanges();
+    fixture.detectChanges();
+    for (const index of [0, 1, 3]) {
+      fixture.nativeElement.querySelectorAll('input')[index].dispatchEvent(new MouseEvent('dblclick'));
+    }
+    expect(page.form.getRawValue()).toMatchObject({ city: 'Tel Aviv', street: 'Ha Masger 10', cardholder: 'John Smith', number: '', expiry: '', cvc: '', date: '' });
+    page.form.controls.city.setValue('Haifa'); page.autofill('city');
+    expect(page.form.controls.city.value).toBe('Haifa');
+    page.form.controls.street.setValue('');
+    TestBed.inject(AuthService).user.set({ ...customer, address: {} }); page.autofill('street');
+    expect(page.form.controls.street.value).toBe('');
+    page.form.controls.city.setValue(''); page.saving.set(true); page.autofill('city');
+    expect(page.form.controls.city.value).toBe('');
+  });
+  function setup(fixture = TestBed.createComponent(CheckoutPage)) {
+    const page = fixture.componentInstance;
     page.loading.set(false); page.cart.id.set('c1'); page.cart.items.set([{ id: 'p1', count: 2, price: 10.5 }]);
     page.form.setValue({ city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01', cardholder: 'John Smith', number: '4242 4242 4242 4242', expiry: '12/99', cvc: '123' });
     return page;
   }
   it('sends shipping and last four digits without card number, expiry or security code', async () => {
-    const page = setup(); const pending = page.submit();
+    const fixture = TestBed.createComponent(CheckoutPage); const page = setup(fixture);
+    vi.spyOn(page.cart, 'load').mockResolvedValue();
+    const pending = page.submit();
     const request = TestBed.inject(HttpTestingController).expectOne('/checkout');
     expect(request.request.body).toEqual({ cartId: 'c1', shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' }, payment: { method: 'credit_card', last4: '4242' } });
-    request.flush({ success: true, order: { id: 'o1', total: 21, shipping: request.request.body.shipping, payment: { mode: 'demo', last4: '4242' } } });
+    request.flush({ success: true, order: { id: 'o1', total: 21, invoiceUrl: '/orders/o1/invoice', shipping: request.request.body.shipping, payment: { mode: 'demo', last4: '4242' } } });
     await pending; expect(page.completed()?.id).toBe('o1'); expect(page.cart.items()).toEqual([]);
     expect(page.form.controls.number.value).toBe(''); expect(page.form.controls.cvc.value).toBe('');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Your order success!');
+    expect(fixture.nativeElement.textContent).not.toContain('THE LAST LITTLE DETAILS');
+    expect(fixture.nativeElement.textContent).not.toContain('Demo order confirmed');
+    const link = fixture.nativeElement.querySelector('a');
+    expect(link.textContent).toBe('here'); expect(link.getAttribute('href')).toBe('/orders/o1/invoice');
+    expect(link.getAttribute('download')).toBe('invoice-o1.pdf');
+    fixture.destroy();
   });
-  it.each([{ date: '2000-01-01' }, { date: '2099-02-30' }, { number: '4111111111111111' }, { expiry: '00/99' }, { cvc: '12' }, { city: ' ' }])('rejects invalid fields (%j)', async invalid => {
+  it.each(['5800  5800 5800 5800', '5800580058005800', '4111111111111111'])('accepts card number %s and sends only its last four digits', async number => {
+    const page = setup(); page.form.controls.number.setValue(number);
+    const pending = page.submit();
+    const request = TestBed.inject(HttpTestingController).expectOne('/checkout');
+    expect(request.request.body.payment).toEqual({ method: 'credit_card', last4: number.replace(/ /g, '').slice(-4) });
+    request.flush({ success: false, reason: 'Test response' }); await pending;
+  });
+  it.each([{ date: '2000-01-01' }, { date: '2099-02-30' }, { number: '58005800' }, { number: '5800 5800 abcd 5800' }, { expiry: '00/99' }, { cvc: '12' }, { city: ' ' }])('rejects invalid fields (%j)', async invalid => {
     const page = setup(); page.form.patchValue(invalid); await page.submit();
     expect(page.error()).toBeTruthy(); TestBed.inject(HttpTestingController).expectNone('/checkout');
   });

@@ -34,7 +34,7 @@ export class AuthService {
     if (!user || !(await compare(body.password, user.password))) return { success: false };
     const token = jwt.sign({}, this.key(), { subject: String(user._id), expiresIn: '9h', algorithm: 'HS256' });
     response.cookie('SESSIONID', token, { httpOnly: true, secure: false, sameSite: 'lax', path: '/' });
-    return { success: true, role: user.role, name: `${user.name.first_name} ${user.name.last_name}`, user: user._id };
+    return { success: true, role: user.role, name: `${user.name.first_name} ${user.name.last_name}`, user: user._id, address: user.address };
   }
 
   async signup(body: any) {

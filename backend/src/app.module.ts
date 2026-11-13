@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { ShopService } from './shop.service';
 import { SessionGuard } from './session.guard';
 import { ImageStorageService } from './image-storage.service';
+import { InvoiceService } from './invoice.service';
 
 @Module({
   imports: [DatabaseModule, ServeStaticModule.forRoot({
@@ -20,6 +21,6 @@ import { ImageStorageService } from './image-storage.service';
     renderPath: '/',
   })],
   controllers: [ApiController],
-  providers: [AuthService, ShopService, SessionGuard, ImageStorageService],
+  providers: [AuthService, ShopService, SessionGuard, ImageStorageService, InvoiceService],
 })
 export class AppModule {}

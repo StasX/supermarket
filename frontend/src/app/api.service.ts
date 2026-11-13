@@ -2,13 +2,13 @@ import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 
-export interface User { user: string; role: number; name: string; }
+export interface User { user: string; role: number; name: string; address?: { city?: string; street?: string }; }
 export interface Product { id: string; name: string; category: string; price: number; image: string; }
 export interface CartItem { id: string; count: number; price: number; }
 export interface Cart { id: string; products: CartItem[]; created: string; }
 export interface Result { success: boolean; }
 export interface CheckoutRequest { cartId: string; shipping: { city: string; street: string; date: string }; payment: { method: 'credit_card'; last4: string }; }
-export interface CheckoutOrder { id: string; total: number; shipping: { city: string; street: string; date: string }; payment: { mode: 'demo'; method: string; last4: string }; }
+export interface CheckoutOrder { id: string; total: number; products?: CartItem[]; invoiceUrl: string; shipping: { city: string; street: string; date: string }; payment: { mode: 'demo'; method: string; last4: string }; }
 export interface ProductResult extends Result { products: (Product & { _id?: string })[]; }
 export interface Signup { id: string; email: string; pass: string; firstName: string; lastName: string; city: string; street: string; }
 export const categories = ['Milk & Eggs', 'Vegetables & Fruits', 'Meet & Fish', 'Wine & Drinks'];
@@ -18,7 +18,7 @@ export class ApiService {
   private readonly http = inject(HttpClient);
   login(username: string, password: string) { return firstValueFrom(this.http.post<Result & Partial<User>>('/login', { username, password })); }
   signup(body: Signup) { return firstValueFrom(this.http.post<{ created: boolean; reason?: string }>('/sign-up', body)); }
-  reconnect() { return firstValueFrom(this.http.get<Result & { role?: number; user?: string; name?: string | { first_name: string; last_name: string } }>('/reconect')); }
+  reconnect() { return firstValueFrom(this.http.get<Result & { role?: number; user?: string; name?: string | { first_name: string; last_name: string }; address?: User['address'] }>('/reconect')); }
   logout() { return firstValueFrom(this.http.get<Result>('/logout')); }
   async products(category = '', search = '') {
     const result = await firstValueFrom(search.trim()

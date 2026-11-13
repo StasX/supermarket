@@ -12,6 +12,7 @@ shipping : {
 },
 created_at: Date,
 products: [],
+invoiceKey: String,
 payment: {
     mode: String,
     method: String,

@@ -146,6 +146,13 @@ footer {
 .panel { background: $surface; border: 1px solid $line; border-radius: 16px; padding: 28px; }
 form { display: grid; gap: 20px; }
 .checkout { max-width: 850px; margin: 0 auto; }
+.checkout-success {
+  text-align: center;
+  padding: 32px 0;
+  h1 { color: $primary; margin-bottom: 20px; }
+  p { color: #7b984e; font-size: clamp(1.2rem, 2.5vw, 1.5rem); line-height: 1.5; margin-bottom: 0; }
+  a { color: inherit; }
+}
 .checkout fieldset { min-width: 0; margin: 0; padding: 20px; border: 1px solid $line; border-radius: 12px; }
 .checkout legend { padding: 0 8px; font-weight: 600; }
 .checkout-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
