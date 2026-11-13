@@ -9,6 +9,228 @@ permissions:
   contents: read
 
 jobs:
+  codeql:
+    name: CodeQL JavaScript and TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          config-file: .github/codeql-config.yml
+
+      - name: Analyze application
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript
+          output: artifacts/codeql
+
+      - name: Save CodeQL reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-results
+          path: artifacts/codeql/
+          if-no-files-found: warn
+          retention-days: 14
+
+  nodejsscan:
+    name: NodeJsScan backend security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.1'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Build backend JavaScript for NodeJsScan
+        run: |
+          npm ci --prefix backend --no-audit --no-fund
+          npm --prefix backend run build
+          mkdir -p artifacts
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Scan compiled backend
+        uses: ajinabraham/njsscan-action@231750a435d85095d33be7d192d52ec650625146 # v9
+        with:
+          args: 'backend/dist --sarif --output artifacts/njsscan.sarif --exit-warning'
+
+      - name: Upload NodeJsScan code scanning results
+        if: ${{ always() && hashFiles('artifacts/njsscan.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: artifacts/njsscan.sarif
+          category: nodejsscan-backend
+
+      - name: Save NodeJsScan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejsscan-results
+          path: artifacts/njsscan.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+  typescript-security:
+    name: Semgrep TypeScript security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Scan backend and frontend TypeScript
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          docker run --rm \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
+            --workdir /workspace --entrypoint semgrep semgrep/semgrep:1.183.0 \
+            scan --config p/typescript --error --strict --metrics=off --json \
+            --include '*.ts' backend/src frontend/src \
+            2> >(tee artifacts/semgrep-typescript.log >&2) \
+            | tee artifacts/semgrep-typescript.json
+
+      - name: Save TypeScript security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-typescript
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+  npm-audit:
+    name: npm audit (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: root
+            directory: .
+          - project: backend
+            directory: backend
+          - project: frontend
+            directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.1'
+
+      - name: Audit locked dependencies
+        working-directory: ${{ matrix.directory }}
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          npm audit --package-lock-only --include=dev --json \
+            2> >(tee "$GITHUB_WORKSPACE/artifacts/npm-audit.log" >&2) \
+            | tee "$GITHUB_WORKSPACE/artifacts/npm-audit.json"
+
+      - name: Save npm audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ matrix.project }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+  dockerfile-security:
+    name: Dockerfile security (${{ matrix.scanner }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scanner: checkov
+            image: ghcr.io/bridgecrewio/checkov:3.4.3
+          - scanner: semgrep
+            image: semgrep/semgrep:1.183.0
+          - scanner: trivy
+            image: aquasec/trivy:0.76.2
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Scan Dockerfiles
+        shell: bash
+        env:
+          SCANNER: ${{ matrix.scanner }}
+          SCANNER_IMAGE: ${{ matrix.image }}
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          case "$SCANNER" in
+            checkov)
+              docker run --rm \
+                --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
+                --workdir /workspace --entrypoint checkov "$SCANNER_IMAGE" \
+                --file Dockerfile --file db/Dockerfile --file minio/Dockerfile \
+                --file integration_tests/Dockerfile --framework dockerfile \
+                --skip-download --output json \
+                2> >(tee artifacts/checkov.log >&2) | tee artifacts/checkov.json
+              ;;
+            semgrep)
+              docker run --rm \
+                --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
+                --workdir /workspace --entrypoint semgrep "$SCANNER_IMAGE" \
+                scan --config p/dockerfile --error --strict --metrics=off --json \
+                Dockerfile db/Dockerfile minio/Dockerfile integration_tests/Dockerfile \
+                2> >(tee artifacts/semgrep.log >&2) | tee artifacts/semgrep.json
+              ;;
+            trivy)
+              docker run --rm \
+                --mount "type=bind,source=$GITHUB_WORKSPACE/Dockerfile,target=/scan/Dockerfile,readonly" \
+                --mount "type=bind,source=$GITHUB_WORKSPACE/db/Dockerfile,target=/scan/db/Dockerfile,readonly" \
+                --mount "type=bind,source=$GITHUB_WORKSPACE/minio/Dockerfile,target=/scan/minio/Dockerfile,readonly" \
+                --mount "type=bind,source=$GITHUB_WORKSPACE/integration_tests/Dockerfile,target=/scan/integration_tests/Dockerfile,readonly" \
+                "$SCANNER_IMAGE" \
+                config --misconfig-scanners dockerfile --exit-code 1 --format json \
+                /scan \
+                2> >(tee artifacts/trivy.log >&2) | tee artifacts/trivy.json
+              ;;
+          esac
+
+      - name: Save security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockerfile-${{ matrix.scanner }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
   tests:
     name: Backend and frontend tests
     runs-on: ubuntu-latest
@@ -34,7 +256,80 @@ jobs:
         run: npm ci --prefix frontend --no-audit --no-fund
 
       - name: Run existing tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          npm test 2>&1 | tee artifacts/unit-tests.log
+
+      - name: Save test logs and application builds
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests-and-builds
+          path: |
+            artifacts/
+            frontend/dist/
+            backend/dist/
+          if-no-files-found: warn
+          retention-days: 14
+
+  playwright:
+    name: Playwright browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_CHANNEL: chromium
+      E2E_BASE_URL: http://localhost:3000
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26.13.1'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies and Chromium
+        run: |
+          npm ci --prefix frontend --no-audit --no-fund
+          cd frontend
+          npx playwright install --with-deps chromium
+
+      - name: Start application with seeded database and MinIO
+        run: |
+          cp .env.example .env
+          mkdir -p artifacts
+          docker compose -p supermarket-playwright up --build -d --wait --wait-timeout 180 \
+            2>&1 | tee artifacts/playwright-startup.log
+
+      - name: Run Playwright tests
+        run: npm --prefix frontend run test:e2e
+
+      - name: Collect browser environment diagnostics
+        if: always()
+        run: |
+          mkdir -p artifacts
+          docker compose -p supermarket-playwright logs --no-color > artifacts/compose.log 2>&1
+          docker compose -p supermarket-playwright ps --all > artifacts/compose-status.txt 2>&1
+
+      - name: Save Playwright reports and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Clean up browser test containers
+        if: always()
+        run: docker compose -p supermarket-playwright down --volumes --remove-orphans
 
   integration:
     name: Integration tests with MongoDB and MinIO
@@ -46,13 +341,32 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run integration tests
-        run: >-
-          docker compose -p supermarket-integration -f integration.compose.yml
-          up --build --abort-on-container-exit --exit-code-from tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          docker compose -p supermarket-integration -f integration.compose.yml \
+            up --build --abort-on-container-exit --exit-code-from tests \
+            2>&1 | tee artifacts/integration-tests.log
 
-      - name: Show integration logs on failure
-        if: failure()
-        run: docker compose -p supermarket-integration -f integration.compose.yml logs --no-color
+      - name: Collect integration diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          docker compose -p supermarket-integration -f integration.compose.yml \
+            logs --no-color > artifacts/compose.log 2>&1
+          docker compose -p supermarket-integration -f integration.compose.yml \
+            ps --all > artifacts/compose-status.txt 2>&1
+
+      - name: Save integration test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-tests
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Clean up integration containers
         if: always()

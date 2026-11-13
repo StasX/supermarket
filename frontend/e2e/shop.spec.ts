@@ -103,6 +103,7 @@ test('customer can shop, change quantities, reload, review, and sign out', async
           success: true,
           order: {
             id: 'demo-order-1',
+            invoiceUrl: '/orders/demo-order-1/invoice',
             total: 31.5,
             shipping: body.shipping,
             payment: { mode: 'demo', method: 'credit_card', last4: '4242' },
@@ -129,10 +130,9 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   await expect(page.locator('table')).toContainText('Apple Juice');
   await page.getByRole('link', { name: 'Continue to checkout' }).click();
   await expect(page.getByRole('heading', { name: 'Checkout', exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'Back to order review', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Review your order', exact: true })).toBeVisible();
-  await expect(page.locator('table')).toContainText('Apple Juice');
-  await page.getByRole('link', { name: 'Continue to checkout' }).click();
+  await expect(page.getByRole('link', { name: 'Back to order review', exact: true })).toHaveCount(
+    0,
+  );
   await page.getByLabel('City', { exact: true }).fill('Tel Aviv');
   await page.getByLabel('Street', { exact: true }).fill('Ha Masger 10');
   await page.getByLabel('Shipping date', { exact: true }).fill('2099-12-01');
@@ -141,8 +141,12 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   await page.getByLabel('Expiry date', { exact: true }).fill('12/99');
   await page.getByLabel('Security code', { exact: true }).fill('123');
   await page.getByRole('button', { name: 'Order' }).click();
-  await expect(page.getByRole('heading', { name: 'Demo order confirmed' })).toBeVisible();
-  await expect(page.getByText('No payment was charged.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your order success!' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'here', exact: true })).toHaveAttribute(
+    'href',
+    '/orders/demo-order-1/invoice',
+  );
+  await expect(page.getByRole('link', { name: 'Continue shopping', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   expect(errors).toEqual([]);
@@ -161,10 +165,10 @@ test('two-step signup validates confirmation and submits the existing API payloa
   await expect(page.getByRole('alert')).toBeVisible();
   await page.getByLabel('Confirm password').fill('password123');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByLabel('First name').fill('John');
-  await page.getByLabel('Last name').fill('Smith');
-  await page.getByLabel('City').selectOption('Tel Aviv');
-  await page.getByLabel('Street').fill('Ha Masger');
+  await page.getByLabel('First name').fill('Anne-Marie');
+  await page.getByLabel('Last name').fill('O’Connor');
+  await page.getByLabel('City').fill('תל אביב');
+  await page.getByLabel('Street').fill('דרך בן-גוריון 10');
   const submitted = page.waitForRequest(
     (request) => request.url().endsWith('/sign-up') && request.method() === 'POST',
   );
@@ -173,10 +177,10 @@ test('two-step signup validates confirmation and submits the existing API payloa
     id: '123456789',
     email: 'test@example.com',
     pass: 'password123',
-    firstName: 'John',
-    lastName: 'Smith',
-    city: 'Tel Aviv',
-    street: 'Ha Masger',
+    firstName: 'Anne-Marie',
+    lastName: 'O’Connor',
+    city: 'תל אביב',
+    street: 'דרך בן-גוריון 10',
   });
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });
