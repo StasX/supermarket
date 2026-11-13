@@ -69,9 +69,13 @@ test.each([
   expect(models.carts.findOne).not.toHaveBeenCalled();
 });
 
-test.each(['4242', '5800', '0000'])(
+test.each([
+  { last4: '4242', city: 'Saint-Étienne', street: '12 O’Connell St., #4/2' },
+  { last4: '5800', city: 'תל אביב', street: 'דרך בן-גוריון 10' },
+  { last4: '0000', city: '北京', street: '北京市东路8号' },
+])(
   'checkout uses catalog prices and persists only demo payment metadata (%s)',
-  async (last4) => {
+  async ({ last4, city, street }) => {
     const products = [{ id: admin._id, count: 2, price: 0.01 }];
     models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
     models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Apple juice', price: 5.25 }]);
@@ -86,12 +90,19 @@ test.each(['4242', '5800', '0000'])(
     const response = await api()
       .post('/checkout')
       .set('Cookie', cookie())
-      .send({ ...checkoutBody, payment: { method: 'credit_card', last4 }, total: 0.01 });
+      .send({
+        ...checkoutBody,
+        shipping: { ...checkoutBody.shipping, city, street },
+        payment: { method: 'credit_card', last4 },
+        total: 0.01,
+      });
     expect(response.body).toMatchObject({
       success: true,
       order: { id: 'order1', total: 10.5, payment: { mode: 'demo', last4 } },
     });
     const saved = models.orders.findOneAndUpdate.mock.calls[0][1].$setOnInsert;
+    expect(saved.shipping).toMatchObject({ city, street });
+    expect(response.body.order.shipping).toMatchObject({ city, street });
     expect(saved.products).toEqual([{ id: admin._id, name: 'Apple juice', count: 2, price: 5.25 }]);
     expect(response.body.order.invoiceUrl).toBe('/orders/order1/invoice');
     const invoice = images.get('invoices/order1.pdf')!;
@@ -375,7 +386,7 @@ beforeAll(async () => {
   const adapterHost = new HttpAdapterHost();
   adapterHost.httpAdapter = adapter;
   const module = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(AuthRateLimitGuard)
+    .overrideGuard(AuthRateLimitGuard)
     .useValue({ canActivate: (context: any) => authRateLimiter.canActivate(context) })
     .overrideProvider(MODELS)
     .useValue(models)
@@ -771,6 +782,61 @@ test('signup hashes the password and forces the customer role', async () => {
   expect(saved.role).toBe(0);
   expect(saved.has_logged_in).toBe(false);
   expect(await bcrypt.compare('password123', saved.password)).toBe(true);
+});
+
+test.each([
+  {
+    firstName: 'Anne-Marie',
+    lastName: "O'Connor",
+    city: 'Saint-Étienne',
+    street: '12 O’Connell St., #4/2',
+  },
+  { firstName: 'יוסף', lastName: 'כהן', city: 'תל אביב', street: 'דרך בן-גוריון 10' },
+  { firstName: '李', lastName: '王', city: '北京', street: '北京市东路8号' },
+  { firstName: 'Jose\u0301', lastName: 'silva', city: 'São Paulo', street: 'Rua São João 1' },
+])('signup accepts international details: %j', async (details) => {
+  const result = await api()
+    .post('/sign-up')
+    .send({
+      id: '123456789',
+      email: customer.username,
+      pass: 'password123',
+      ...details,
+    })
+    .expect(200);
+  expect(result.body).toEqual({ created: true });
+  expect(models.users.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: { first_name: details.firstName, last_name: details.lastName },
+      address: { city: details.city, street: details.street },
+    }),
+  );
+});
+
+test.each([
+  { firstName: ' ' },
+  { lastName: '123' },
+  { city: '<script>' },
+  { street: '---' },
+  { street: 'Main\nStreet' },
+  { firstName: 'A'.repeat(151) },
+  { street: 'A'.repeat(151) },
+])('signup rejects invalid details: %j', async (details) => {
+  const result = await api()
+    .post('/sign-up')
+    .send({
+      id: '123456789',
+      email: customer.username,
+      pass: 'password123',
+      firstName: 'John',
+      lastName: 'Smith',
+      city: 'Tel Aviv',
+      street: 'Main 1',
+      ...details,
+    })
+    .expect(200);
+  expect(result.body.created).toBe(false);
+  expect(models.users.create).not.toHaveBeenCalled();
 });
 
 test('signup rejects invalid input without writing to the database', async () => {

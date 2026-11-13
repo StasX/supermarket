@@ -97,8 +97,10 @@ export class AuthService {
   }
 
   async signup(body: SignupInput) {
-    const name = /^(([A-Z][a-z]+)(((\s)[A-Z]([a-z])+)+)*)$/;
-    const street = /^(([A-Z0-9][a-z0-9]+)(((\s)[A-Z0-9]([a-z0-9])+)+)*)$/;
+    const name =
+      /^(?=.{1,150}$)\p{L}[\p{L}\p{M}]*(?:[ '\u2019\u02bc\-\u2010\u2011][\p{L}\p{M}]+)*$/u;
+    const street =
+      /^(?=.{1,150}$)(?=.*[\p{L}\p{N}])[\p{L}\p{M}\p{N} '\u2019\u02bc\-\u2010\u2011.,/#]+$/u;
     if (
       typeof body.firstName !== 'string' ||
       typeof body.lastName !== 'string' ||

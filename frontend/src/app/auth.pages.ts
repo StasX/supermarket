@@ -152,18 +152,22 @@ export class LoginPage {
               >Last name<input formControlName="lastName" autocomplete="family-name" required
             /></label>
             <label
-              >City<select formControlName="city" required>
-                <option value="">Select a city</option>
+              >City<input
+                formControlName="city"
+                autocomplete="address-level2"
+                list="signup-cities"
+                required />
+              <datalist id="signup-cities">
                 @for (city of cities; track city) {
-                  <option [value]="city">{{ city }}</option>
-                }
-              </select></label
-            >
+                  <option [value]="city"></option>
+                }</datalist
+            ></label>
             <label
               >Street<input formControlName="street" autocomplete="street-address" required
             /></label>
             <p class="hint">
-              Use capitalized English names and addresses, as required by the current API.
+              Names and addresses can use any language, apostrophes, and hyphens (up to 150
+              characters).
             </p>
             <div class="actions">
               <button type="button" class="secondary" (click)="back()" [disabled]="busy()">

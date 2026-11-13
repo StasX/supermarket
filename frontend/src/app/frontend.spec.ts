@@ -21,7 +21,13 @@ import { LoginPage, SignupPage } from './auth.pages';
 import { ManagementPage } from './store.pages';
 import { CheckoutPage } from './checkout.page';
 import { CustomerWelcome } from './customer.pages';
-import { emailPattern, passwordsMatch, priceValidator } from './validators';
+import {
+  emailPattern,
+  namePattern,
+  streetPattern,
+  passwordsMatch,
+  priceValidator,
+} from './validators';
 
 const customer = { user: 'u1', name: 'John Smith', role: 0 };
 const product: Product = {
@@ -39,6 +45,27 @@ beforeEach(() =>
 afterEach(() => TestBed.inject(HttpTestingController).verify());
 
 describe('form validation', () => {
+  it.each(["O'Connor", 'Anne-Marie', 'D’Arcy', 'יוסף', '李', 'Jose\u0301', 'jean', 'תל אביב'])(
+    'accepts name or city %s',
+    (value) => {
+      expect(new FormControl(value, Validators.pattern(namePattern)).valid).toBe(true);
+    },
+  );
+  it.each([' ', '123', '<script>', 'John\nSmith', 'A'.repeat(151)])('rejects name %s', (value) => {
+    expect(new FormControl(value, Validators.pattern(namePattern)).valid).toBe(false);
+  });
+  it.each(["12 O'Connell St., #4/2", 'דרך בן-גוריון 10', 'شارع النيل ٢', '北京市东路8号'])(
+    'accepts street %s',
+    (value) => {
+      expect(new FormControl(value, Validators.pattern(streetPattern)).valid).toBe(true);
+    },
+  );
+  it.each([' ', '---', '<script>', 'Main\nStreet', 'A'.repeat(151)])(
+    'rejects street %s',
+    (value) => {
+      expect(new FormControl(value, Validators.pattern(streetPattern)).valid).toBe(false);
+    },
+  );
   it.each(['0.00', '10.99'])('accepts price %s', (value) =>
     expect(new FormControl(value, priceValidator).valid).toBe(true),
   );
@@ -467,6 +494,25 @@ describe('welcome shopping summary', () => {
 });
 
 describe('demo checkout', () => {
+  it.each([
+    { city: 'Saint-Étienne', street: '12 O’Connell St., #4/2', cardholder: "Anne-Marie O'Connor" },
+    { city: 'תל אביב', street: 'דרך בן-גוריון 10', cardholder: 'יוסף כהן' },
+    { city: '北京', street: '北京市东路8号', cardholder: '李王' },
+  ])('submits international shipping and cardholder details (%j)', async (details) => {
+    const page = setup();
+    page.form.patchValue(details);
+    expect(page.form.valid).toBe(true);
+    const pending = page.submit();
+    const request = TestBed.inject(HttpTestingController).expectOne('/checkout');
+    expect(request.request.body.shipping).toEqual({
+      city: details.city,
+      street: details.street,
+      date: '2099-12-01',
+    });
+    expect(request.request.body.payment).toEqual({ method: 'credit_card', last4: '4242' });
+    request.flush({ success: false, reason: 'Test response' });
+    await pending;
+  });
   it('fills empty profile fields on double click and preserves entered values', async () => {
     TestBed.inject(AuthService).user.set({
       ...customer,

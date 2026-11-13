@@ -32,6 +32,9 @@ import { expiryValidator, localDate, shippingDateValidator } from './checkout.va
         <form [formGroup]="form" (ngSubmit)="submit()">
           <fieldset [disabled]="saving()">
             <legend>Shipping details</legend>
+            <p class="hint">
+              Addresses can use any language, apostrophes, and hyphens (up to 150 characters).
+            </p>
             <div class="checkout-fields">
               <label
                 >City<input
