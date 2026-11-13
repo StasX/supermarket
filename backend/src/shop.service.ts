@@ -54,18 +54,48 @@ export class ShopService {
   }
 
   async createCart(user: any, body: any) {
-    if (!Array.isArray(body.products)) return { success: false };
+    const products = await this.cartProducts(body?.products);
+    if (!products) return { success: false };
     if (await this.models.carts.findOne({ user_id: user.id, status: 1 })) return { success: false };
-    const cart = await this.models.carts.create({ user_id: user.id, products: body.products, created_at: new Date() });
-    return { success: true, id: cart._id, date: cart.created_at };
+    try {
+      const cart = await this.models.carts.create({ user_id: user.id, products, created_at: new Date() });
+      return { success: true, id: cart._id, date: cart.created_at, products };
+    } catch (error) {
+      if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) return { success: false };
+      throw error;
+    }
   }
 
   async updateCart(user: any, body: any) {
-    if (!validId(body.id) || !Array.isArray(body.products)) return { success: false };
+    if (!validId(body?.id)) return { success: false };
+    const products = await this.cartProducts(body.products);
+    if (!products) return { success: false };
     const cart = await this.models.carts.findOneAndUpdate(
-      { _id: body.id, user_id: user.id, status: 1 }, { $set: { products: body.products } },
+      { _id: body.id, user_id: user.id, status: 1 }, { $set: { products } },
     );
-    return { success: Boolean(cart) };
+    return cart ? { success: true, products } : { success: false };
+  }
+
+  private async cartProducts(input: unknown) {
+    if (!Array.isArray(input)) return null;
+    const ids = new Set<string>();
+    for (const item of input) {
+      if (!item || !validId(item.id) || !Number.isSafeInteger(item.count) || item.count < 1) return null;
+      const id = item.id.toLowerCase();
+      if (ids.has(id)) return null;
+      ids.add(id);
+    }
+    if (!input.length) return [];
+    const catalog: ProductRecord[] = await this.models.products.find({ _id: { $in: [...ids] } });
+    const prices = new Map(catalog.map(product => [String(product._id), product.price]));
+    const products: { id: string; count: number; price: number }[] = [];
+    for (const item of input) {
+      const id = item.id.toLowerCase();
+      const price = prices.get(id);
+      if (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || !Number.isFinite(price * item.count)) return null;
+      products.push({ id, count: item.count, price });
+    }
+    return products;
   }
 
   async cart(user: any) {
@@ -76,5 +106,51 @@ export class ShopService {
   async lastOrder(user: any) {
     const order = await this.models.orders.findOne({ user_id: user.id }).sort({ _id: -1 });
     return order ? { success: true, order } : { success: true };
+  }
+
+  async checkout(user: any, body: any) {
+    const fail = (reason: string) => ({ success: false, reason });
+    if (!validId(body?.cartId)) return fail('Choose an open cart.');
+    const cartId = body.cartId.toLowerCase();
+    const shipping = body.shipping;
+    if (!shipping || ![shipping.city, shipping.street].every(value => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 150)) {
+      return fail('Enter a city and street (up to 150 characters each).');
+    }
+    const date = typeof shipping.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(shipping.date) ? new Date(`${shipping.date}T00:00:00Z`) : new Date(NaN);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== shipping.date || shipping.date < today) return fail('Choose today or a future shipping date.');
+    // Demo payments accept only the documented test card marker, never card numbers or CVC.
+    if (body.payment?.method !== 'credit_card' || body.payment?.last4 !== '4242' ||
+      Object.keys(body.payment).some(key => !['method', 'last4'].includes(key))) return fail('Use the demo credit card. No charge will be made.');
+    let cart = await this.models.carts.findOne({ _id: cartId, user_id: user.id });
+    if (!cart) return fail('Cart not found.');
+    if (cart.status === 1) {
+      const products = await this.cartProducts(cart.products);
+      if (!products?.length) return fail('Add available products before checking out.');
+      const cents = products.reduce((sum, item) => sum + Math.round(item.price * 100) * item.count, 0);
+      if (!Number.isSafeInteger(cents)) return fail('The order total is too large.');
+      const snapshot = {
+        user_id: user.id, username: user.username, cart_id: String(cart._id), products, price: cents / 100,
+        shipping: { city: shipping.city.trim(), street: shipping.street.trim(), date },
+        payment: { mode: 'demo', method: 'credit_card', last4: '4242' }, created_at: new Date(),
+      };
+      // Persist the order snapshot and close the cart atomically. Matching products
+      // prevents checkout racing with a cart edit. The snapshot supports safe retries.
+      const closed = await this.models.carts.findOneAndUpdate(
+        { _id: cart._id, user_id: user.id, status: 1, products: cart.products },
+        { $set: { status: 0, checkout: snapshot } }, { returnDocument: 'after' },
+      );
+      cart = closed || await this.models.carts.findOne({ _id: cartId, user_id: user.id });
+    }
+    if (cart?.status !== 0 || !cart.checkout) return fail('Your cart changed. Review it and try again.');
+    const query = { cart_id: cartId, 'payment.mode': 'demo' };
+    let order;
+    try {
+      order = await this.models.orders.findOneAndUpdate(query, { $setOnInsert: cart.checkout }, { upsert: true, returnDocument: 'after' });
+    } catch (error) {
+      if (!(error instanceof mongoose.mongo.MongoServerError) || error.code !== 11000) throw error;
+      order = await this.models.orders.findOne(query);
+    }
+    return { success: true, order: { id: order._id, total: order.price, shipping: order.shipping, payment: order.payment } };
   }
 }

@@ -1,38 +1,160 @@
-require('reflect-metadata');
-const { Test } = require('@nestjs/testing');
-const { HttpAdapterHost } = require('@nestjs/core');
-const { ExpressAdapter } = require('@nestjs/platform-express');
+import { afterAll, beforeAll, beforeEach, describe, expect, jest, test } from '@jest/globals';
+import type { INestApplication } from '@nestjs/common';
+import 'reflect-metadata';
+import { Test } from '@nestjs/testing';
+import { HttpAdapterHost } from '@nestjs/core';
+import { ExpressAdapter } from '@nestjs/platform-express';
 const request = require('supertest');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+import * as bcrypt from 'bcryptjs';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { Readable } from 'node:stream';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { NotFoundException } from '@nestjs/common';
 const { AppModule } = require('../dist/app.module');
 const { MODELS } = require('../dist/database.module');
+const { ImageStorageService } = require('../dist/image-storage.service');
+const images = new Map<string, Buffer>();
 
 const customer = { _id: '507f1f77bcf86cd799439011', id: 123456789, username: 'buyer@example.com',
   name: { first_name: 'John', last_name: 'Smith' }, role: 0 };
 const admin = { ...customer, _id: '507f1f77bcf86cd799439012', role: 1 };
 const key = 'test-only-session-signing-key';
-let app, models, directory, oldKeyPath;
+let app: INestApplication;
+type Collection = 'users' | 'products' | 'carts' | 'orders';
+type ModelMethod = 'find' | 'findOne' | 'create' | 'countDocuments' | 'findByIdAndUpdate' | 'findOneAndUpdate';
+type MockModels = Record<Collection, Record<ModelMethod, jest.Mock<(...args: any[]) => any>>>;
+let models: MockModels;
+let directory: string;
+let oldKeyPath: string | undefined;
 const cookie = (user = customer, options = {}) => `SESSIONID=${jwt.sign({}, key, { subject: user._id, expiresIn: '1h', ...options })}`;
 const api = () => request(app.getHttpServer());
+const checkoutBody = { cartId: customer._id, shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' }, payment: { method: 'credit_card', last4: '4242' } };
+
+test.each([null, admin])('checkout requires a customer session (%s)', async user => {
+  const call = api().post('/checkout');
+  if (user) call.set('Cookie', cookie(user));
+  expect((await call.send(checkoutBody)).body.success).toBe(false);
+});
+
+test.each([
+  { ...checkoutBody, shipping: { ...checkoutBody.shipping, city: ' ' } },
+  { ...checkoutBody, shipping: { ...checkoutBody.shipping, date: '2000-01-01' } },
+  { ...checkoutBody, shipping: { ...checkoutBody.shipping, date: '2099-02-30' } },
+  { ...checkoutBody, payment: { method: 'credit_card', last4: '1234' } },
+  { ...checkoutBody, payment: { ...checkoutBody.payment, number: '4242424242424242', cvc: '123' } },
+])('checkout rejects invalid shipping or payment data (%j)', async body => {
+  expect((await api().post('/checkout').set('Cookie', cookie()).send(body)).body.success).toBe(false);
+  expect(models.carts.findOne).not.toHaveBeenCalled();
+});
+
+test('checkout uses catalog prices and persists only demo payment metadata', async () => {
+  const products = [{ id: admin._id, count: 2, price: 0.01 }];
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
+  models.products.find.mockResolvedValue([{ _id: admin._id, price: 5.25 }]);
+  models.carts.findOneAndUpdate.mockImplementation(async (_query, update) => ({ status: 0, checkout: update.$set.checkout }));
+  models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => ({ _id: 'order1', ...update.$setOnInsert }));
+  const response = await api().post('/checkout').set('Cookie', cookie()).send({ ...checkoutBody, total: 0.01 });
+  expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 10.5, payment: { mode: 'demo', last4: '4242' } } });
+  const saved = models.orders.findOneAndUpdate.mock.calls[0][1].$setOnInsert;
+  expect(saved.products).toEqual([{ id: admin._id, count: 2, price: 5.25 }]);
+  expect(saved).not.toHaveProperty('credit_card');
+  expect(saved.payment).toEqual({ mode: 'demo', method: 'credit_card', last4: '4242' });
+  expect(models.carts.findOneAndUpdate.mock.calls[0][0]).toMatchObject({ _id: customer._id, user_id: customer.id, status: 1, products });
+});
+
+test('checkout rejects another customer cart or an empty cart', async () => {
+  models.carts.findOne.mockResolvedValue(null);
+  expect((await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody)).body.success).toBe(false);
+  expect(models.carts.findOne).toHaveBeenCalledWith({ _id: customer._id, user_id: customer.id });
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products: [] });
+  expect((await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody)).body.success).toBe(false);
+  expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
+});
+
+test('checkout retries a closed cart using its original snapshot', async () => {
+  const snapshot = { cart_id: customer._id, price: 12, shipping: checkoutBody.shipping, payment: { mode: 'demo', method: 'credit_card', last4: '4242' } };
+  models.carts.findOne.mockResolvedValue({ status: 0, checkout: snapshot });
+  models.orders.findOneAndUpdate.mockResolvedValue({ _id: 'order1', ...snapshot });
+  const response = await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody);
+  expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 12 } });
+  expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(models.orders.findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: snapshot });
+});
+
+test('S3 storage signs path-style requests, preserves image bytes, and maps missing objects to 404', async () => {
+  const keys = ['S3_ENDPOINT', 'S3_FORCE_PATH_STYLE', 'S3_BUCKET', 'S3_CREATE_BUCKET', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];
+  const previous = keys.map(key => process.env[key]);
+  const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const received: { method?: string; url?: string; authorization?: string; body: Buffer }[] = [];
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    received.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: Buffer.concat(chunks) });
+    if (req.url?.includes('missing')) {
+      res.writeHead(404, { 'Content-Type': 'application/xml' });
+      res.end('<Error><Code>NoSuchKey</Code><Message>Missing image</Message></Error>');
+    } else if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(bytes);
+    } else { res.writeHead(200); res.end(); }
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  let storage: InstanceType<typeof ImageStorageService> | undefined;
+  try {
+    Object.assign(process.env, {
+      S3_ENDPOINT: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      S3_FORCE_PATH_STYLE: 'true', S3_BUCKET: 'test-images', S3_CREATE_BUCKET: 'true',
+      AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'test-access', AWS_SECRET_ACCESS_KEY: 'test-secret',
+    });
+    storage = new ImageStorageService();
+    await storage.onModuleInit();
+    await storage.put('abc.png', bytes, 'image/png');
+    const stream = await storage.get('abc.png');
+    const downloaded: Buffer[] = [];
+    for await (const chunk of stream) downloaded.push(Buffer.from(chunk));
+    expect(Buffer.concat(downloaded)).toEqual(bytes);
+    await expect(storage.get('missing.png')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(storage.get('../unsafe.png')).rejects.toBeInstanceOf(NotFoundException);
+    expect(received[0].method).toBe('HEAD');
+    const upload = received.find(item => item.method === 'PUT');
+    if (!upload) throw new Error('S3 upload request was not received');
+    expect(upload.url).toContain('/test-images/abc.png');
+    expect(upload.authorization).toContain('AWS4-HMAC-SHA256 Credential=test-access/');
+    expect(upload.body).toEqual(bytes);
+  } finally {
+    storage?.onModuleDestroy();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    keys.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
+    });
+  }
+});
 
 beforeAll(async () => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'supermarket-nest-'));
-  oldKeyPath = process.env.JWT_KEY_PATH;
-  process.env.JWT_KEY_PATH = path.join(directory, 'session.key');
-  fs.writeFileSync(process.env.JWT_KEY_PATH, key);
+  oldKeyPath = process.env['JWT_KEY_PATH'];
+  process.env['JWT_KEY_PATH'] = path.join(directory, 'session.key');
+  fs.writeFileSync(process.env['JWT_KEY_PATH'], key);
   models = Object.fromEntries(['users', 'products', 'orders', 'carts'].map(name => [name,
-    Object.fromEntries(['find', 'findOne', 'create', 'countDocuments', 'findByIdAndUpdate', 'findOneAndUpdate'].map(method => [method, jest.fn()])),
-  ]));
+    Object.fromEntries(['find', 'findOne', 'create', 'countDocuments', 'findByIdAndUpdate', 'findOneAndUpdate'].map(method => [method, jest.fn<(...args: any[]) => any>()])),
+  ])) as MockModels;
   const adapter = new ExpressAdapter();
   const adapterHost = new HttpAdapterHost();
   adapterHost.httpAdapter = adapter;
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(MODELS).useValue(models)
+    .overrideProvider(ImageStorageService).useValue({
+      put: async (filename: string, bytes: Buffer) => { images.set(filename, bytes); },
+      get: async (filename: string) => {
+        const bytes = images.get(filename);
+        if (!bytes) throw new NotFoundException();
+        return Readable.from(bytes);
+      },
+    })
     .overrideProvider(HttpAdapterHost).useValue(adapterHost).compile();
   app = module.createNestApplication(adapter);
   app.use(cookieParser());
@@ -41,14 +163,15 @@ beforeAll(async () => {
 
 beforeEach(() => {
   jest.resetAllMocks();
+  images.clear();
   models.users.findOne.mockImplementation(async query => query._id === admin._id ? admin : query._id === customer._id ? customer : null);
   models.products.find.mockResolvedValue([]);
 });
 
 afterAll(async () => {
   if (app) await app.close();
-  if (oldKeyPath === undefined) delete process.env.JWT_KEY_PATH;
-  else process.env.JWT_KEY_PATH = oldKeyPath;
+  if (oldKeyPath === undefined) delete process.env['JWT_KEY_PATH'];
+  else process.env['JWT_KEY_PATH'] = oldKeyPath;
   if (directory) { fs.unlinkSync(path.join(directory, 'session.key')); fs.rmdirSync(directory); }
 });
 
@@ -83,11 +206,12 @@ test('uploads detect image format from content and serve the saved file', async 
   const response = await api().post('/upload-product-image').set('Cookie', cookie(admin))
     .attach('image', source, { filename: '../../untrusted.jpg', contentType: 'image/jpeg' }).expect(200);
   expect(response.body.image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
-  const savedPath = path.join(__dirname, '..', 'static', response.body.image);
-  try {
-    const served = await api().get(response.body.image).expect(200).expect('Content-Type', /image\/png/);
-    expect(served.body.equals(fs.readFileSync(source))).toBe(true);
-  } finally { fs.unlinkSync(savedPath); }
+  const served = await api().get(response.body.image).expect(200).expect('Content-Type', /image\/png/);
+  expect(served.body.equals(fs.readFileSync(source))).toBe(true);
+});
+
+test('missing uploaded images return 404', async () => {
+  await api().get('/products/uploads/00000000-0000-0000-0000-000000000000.png').expect(404);
 });
 
 test('uploads reject missing files and disguised non-images', async () => {
@@ -128,7 +252,7 @@ test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async ca
   else expect(models.products.find).toHaveBeenCalledWith({ category });
 });
 
-for (const [route, collection, field] of [['total-products', 'products', 'productsCount'], ['total-orders', 'orders', 'ordersCount']]) {
+for (const [route, collection, field] of [['total-products', 'products', 'productsCount'], ['total-orders', 'orders', 'ordersCount']] as const) {
   test.each([0, 7])(`${route} returns count %i`, async count => {
     models[collection].countDocuments.mockResolvedValue(count);
     expect((await api().get(`/${route}`).set('Cookie', cookie()).expect(200)).body).toEqual({ success: true, [field]: count });
@@ -226,17 +350,55 @@ test('cart updates enforce ownership and open status', async () => {
 
 test('creates and retrieves an open cart using the existing user id', async () => {
   models.carts.create.mockResolvedValue({ _id: 'cart1', created_at: '2026-01-01' });
-  expect((await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200)).body).toEqual({ success: true, id: 'cart1', date: '2026-01-01' });
+  expect((await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200)).body).toEqual({ success: true, id: 'cart1', date: '2026-01-01', products: [] });
   models.carts.findOne.mockResolvedValue({ _id: 'cart1', products: [], created_at: '2026-01-01' });
   expect((await api().get('/get-cart').set('Cookie', cookie()).expect(200)).body).toEqual({ success: true, cart: { id: 'cart1', products: [], created: '2026-01-01' } });
 });
 
+test('a concurrent duplicate cart insert returns the normal failure response', async () => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.carts.create.mockRejectedValue(new MongoServerError({ code: 11000, message: 'duplicate key' }));
+  expect((await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200)).body)
+    .toEqual({ success: false });
+});
+
 test('order history returns a response even when no orders exist', async () => {
-  const sort = jest.fn().mockResolvedValue(null);
+  const sort = jest.fn<(...args: unknown[]) => Promise<null>>().mockResolvedValue(null);
   models.orders.findOne.mockReturnValue({ sort });
   expect((await api().get('/get-last-order').set('Cookie', cookie()).expect(200)).body).toEqual({ success: true });
   expect(models.orders.findOne).toHaveBeenCalledWith({ user_id: customer.id });
   expect(sort).toHaveBeenCalledWith({ _id: -1 });
+});
+
+describe.each(['create-cart', 'update-cart'])('%s validates cart contents', route => {
+  const productId = '507f1f77bcf86cd799439013';
+  const item = { id: productId, count: 2, price: -100, extra: 'discard' };
+  const send = (products: unknown) => api().post(`/${route}`).set('Cookie', cookie()).send({ id: customer._id, products });
+
+  test.each([null, {}, [null], ['invalid'], [{ ...item, id: 'invalid' }],
+    ...[0, -1, 1.5, '2', null, Number.MAX_SAFE_INTEGER + 1].map(count => [{ ...item, count }]),
+    [{ id: productId, quantity: 2 }], [item, { ...item, id: productId.toUpperCase() }],
+  ].map(products => [products]))('rejects malformed items without writing (%j)', async products => {
+    expect((await send(products).expect(200)).body).toEqual({ success: false });
+    expect(models.carts.create).not.toHaveBeenCalled();
+    expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('rejects nonexistent products without writing', async () => {
+    expect((await send([item]).expect(200)).body).toEqual({ success: false });
+    expect(models.carts.create).not.toHaveBeenCalled();
+    expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('persists and returns catalog prices, discarding client prices and extra fields', async () => {
+    models.products.find.mockResolvedValue([{ _id: productId, price: 4.5 }]);
+    models.carts.create.mockResolvedValue({ _id: 'cart1' });
+    models.carts.findOneAndUpdate.mockResolvedValue({ _id: customer._id });
+    const products = [{ id: productId, count: 2, price: 4.5 }];
+    expect((await send([item]).expect(200)).body).toMatchObject({ success: true, products });
+    if (route === 'create-cart') expect(models.carts.create.mock.calls[0][0].products).toEqual(products);
+    else expect(models.carts.findOneAndUpdate.mock.calls[0][1]).toEqual({ $set: { products } });
+  });
 });
 
 test('unknown endpoints return 404', async () => {

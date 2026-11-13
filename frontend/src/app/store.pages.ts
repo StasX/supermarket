@@ -21,7 +21,7 @@ import { priceValidator } from './validators';
           </div>
         }
         <p class="total">Total: <span>{{ cart.total() | currency:'USD' }}</span></p><a class="button" routerLink="/order/cart">Review order <span aria-hidden="true">→</span></a>
-      } @else {<div class="empty-cart"><span class="basket-symbol" aria-hidden="true">⌑</span><p>Your cart is empty.</p><small>Something delicious is waiting.<br>Add your first favourite to get started.</small></div>}
+      } @else {<div class="empty-cart"><span class="basket-symbol" aria-hidden="true"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="m5 9 4-6m10 6-4-6M3 9h18l-2 11H5L3 9Z"/><path d="M9 13v3m6-3v3M2 9h20"/></svg></span><p>Your cart is empty.</p><small>Something delicious is waiting.<br>Add your first favourite to get started.</small></div>}
       <p class="cart-note">A little of what you love, all in one basket.</p>
     </section>
   `,

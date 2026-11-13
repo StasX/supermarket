@@ -10,12 +10,12 @@ test('administrator can upload a product image and retain it when editing', asyn
     uploadCount++;
     expect(route.request().headers()['content-type']).toContain('multipart/form-data');
     expect(route.request().postDataBuffer()?.includes(Buffer.from('filename="edam.png"'))).toBe(true);
-    await route.fulfill({ json: { success: true, image: '/products/uploads/new.png' } });
+    await route.fulfill({ json: { success: true, image: '/products/new.png' } });
   });
   for (const endpoint of ['add-product', 'edit-product']) {
     await page.route(`**/${endpoint}`, async route => {
       const body = route.request().postDataJSON();
-      expect(body.image).toBe('/products/uploads/new.png');
+      expect(body.image).toBe('/products/new.png');
       product = { ...product, ...body, price: Number(body.price) };
       await route.fulfill({ json: { success: true } });
     });
@@ -42,7 +42,7 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const product = { id: 'p1', name: 'Apple Juice', category: 'Wine & Drinks', price: 10.5, image: '/assets/img/logo.png' };
   let cart: { id: string; count: number; price: number }[] = []; let exists = false;
-  for (const path of ['reconect', 'get-all-products', 'get-products-by-category', 'find-product', 'get-cart', 'create-cart', 'update-cart', 'logout']) {
+  for (const path of ['reconect', 'get-all-products', 'get-products-by-category', 'find-product', 'get-cart', 'create-cart', 'update-cart', 'checkout', 'logout']) {
     await page.route(`**/${path}`, async route => {
       const body = route.request().postDataJSON();
       let result: object = { success: true };
@@ -50,6 +50,11 @@ test('customer can shop, change quantities, reload, review, and sign out', async
       if (['get-all-products', 'get-products-by-category', 'find-product'].includes(path)) result = { success: true, products: [product] };
       if (path === 'get-cart') result = { success: true, ...(exists ? { cart: { id: 'c1', products: cart, created: '2026-01-01' } } : {}) };
       if (path === 'create-cart' || path === 'update-cart') { cart = body.products; exists = true; result = { success: true, id: 'c1', date: '2026-01-01' }; }
+      if (path === 'checkout') {
+        expect(body.payment).toEqual({ method: 'credit_card', last4: '4242' });
+        result = { success: true, order: { id: 'demo-order-1', total: 31.5, shipping: body.shipping, payment: { mode: 'demo', method: 'credit_card', last4: '4242' } } };
+        cart = []; exists = false;
+      }
       await route.fulfill({ json: result });
     });
   }
@@ -66,7 +71,21 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   await expect(page.getByRole('heading', { name: 'Review your order' })).toBeVisible();
   await expect(page.locator('table')).toContainText('Apple Juice');
   await page.getByRole('link', { name: 'Continue to checkout' }).click();
-  await expect(page.getByText('Online checkout is not available yet. Your shopping cart is saved.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Checkout', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Back to order review', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Review your order', exact: true })).toBeVisible();
+  await expect(page.locator('table')).toContainText('Apple Juice');
+  await page.getByRole('link', { name: 'Continue to checkout' }).click();
+  await page.getByLabel('City', { exact: true }).fill('Tel Aviv');
+  await page.getByLabel('Street', { exact: true }).fill('Ha Masger 10');
+  await page.getByLabel('Shipping date', { exact: true }).fill('2099-12-01');
+  await page.getByLabel('Cardholder name', { exact: true }).fill('John Smith');
+  await page.getByLabel('Card number', { exact: true }).fill('4242 4242 4242 4242');
+  await page.getByLabel('Expiry date', { exact: true }).fill('12/99');
+  await page.getByLabel('Security code', { exact: true }).fill('123');
+  await page.getByRole('button', { name: 'Order' }).click();
+  await expect(page.getByRole('heading', { name: 'Demo order confirmed' })).toBeVisible();
+  await expect(page.getByText('No payment was charged.')).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   expect(errors).toEqual([]);

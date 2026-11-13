@@ -65,10 +65,3 @@ export class OrderPage implements OnInit {
   readonly cart = inject(CartService); readonly error = signal('');
   async ngOnInit() { try { await this.cart.load(); } catch { this.error.set('Unable to load your order. Please try again.'); } }
 }
-
-@Component({
-  selector: 'app-checkout', imports: [RouterLink],
-  template: `<section class="panel"><span class="eyebrow">A LITTLE SOMETHING FOR LATER</span><h1>Checkout</h1><p>Online checkout is not available yet. Your shopping cart is saved.</p>
-    <a class="button" routerLink="/store">Return to store</a></section>`,
-})
-export class CheckoutPage {}

@@ -1,19 +1,26 @@
-﻿const { before, after, test } = require('node:test');
-const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
-const { tmpdir } = require('node:os');
-const path = require('node:path');
-const net = require('node:net');
-const { once } = require('node:events');
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import { randomBytes } from 'node:crypto';
+﻿import { before, after, test } from 'node:test';
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
+import type { AddressInfo } from 'node:net';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import * as net from 'node:net';
+import { once } from 'node:events';
+import mongoose from 'mongoose';
+import * as bcrypt from 'bcryptjs';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
+const { createStorageClient } = require('../dist/image-storage.service');
 const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
 
-let server, base, temporaryDirectory, customerCookie, adminCookie;
+let server: ChildProcessByStdio<null, Readable, Readable>;
+let base: string, temporaryDirectory: string, customerCookie: string, adminCookie: string;
 let logs = '';
 const password = 'Integration123!';
 const registration = {
@@ -21,7 +28,7 @@ const registration = {
     pass: password, id: '123456789', city: 'London', street: 'High Street'
 };
 
-async function request(route, { method = 'GET', body, cookie } = {}) {
+async function request(route: string, { method = 'GET', body, cookie }: { method?: string; body?: unknown; cookie?: string } = {}) {
     const response = await fetch(base + route, {
         method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -32,7 +39,7 @@ async function request(route, { method = 'GET', body, cookie } = {}) {
 }
 
 before(async () => {
-    const uri = process.env.MONGODB_URI;
+    const uri = process.env['MONGODB_URI'];
     // This suite clears its database. Refuse the application's normal database.
     assert.ok(uri && /^mongodb:\/\/[^/]+\/shop_integration(?:\?|$)/.test(uri),
         'MONGODB_URI must point to a dedicated shop_integration database');
@@ -44,12 +51,12 @@ before(async () => {
         name: { first_name: 'Admin', last_name: 'User' }, role: 1 });
     temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'shop-integration-'));
     const keyPath = path.join(temporaryDirectory, 'key.pem');
-    writeFileSync(keyPath, require('node:crypto').randomBytes(48).toString('hex'));
+    writeFileSync(keyPath, randomBytes(48).toString('hex'));
     const portProbe = net.createServer();
     portProbe.listen(0, '127.0.0.1');
     await once(portProbe, 'listening');
-    const port = portProbe.address().port;
-    await new Promise(resolve => portProbe.close(resolve));
+    const port = (portProbe.address() as AddressInfo).port;
+    await new Promise<void>((resolve, reject) => portProbe.close((error?: Error) => error ? reject(error) : resolve()));
     base = `http://127.0.0.1:${port}`;
     server = spawn(process.execPath, ['dist/main.js'], {
         cwd: path.join(__dirname, '..'),
@@ -106,6 +113,7 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
         const login = await request('/login', { method: 'POST', body: { username, password } });
         assert.equal(login.body.success, true);
         assert.equal(login.body.role, role);
+        assert.ok(login.cookie, 'Login must set a session cookie');
         assert.match(login.cookie, /HttpOnly/i);
         const cookie = login.cookie.split(';')[0];
         if (role === 0) customerCookie = cookie;
@@ -118,7 +126,7 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
 
 test('admin product writes persist, validate input, and enforce customer permissions', async () => {
     const product = { name: 'Test Milk', category: 'Milk & Eggs', price: '4.50', image: 'test-milk.png' };
-    const add = (body, cookie = adminCookie) => request('/add-product', { method: 'POST', body, cookie });
+    const add = (body: unknown, cookie = adminCookie) => request('/add-product', { method: 'POST', body, cookie });
     assert.equal((await add(product, customerCookie)).body.success, false);
     assert.equal(await Product.countDocuments({}), 0);
     assert.equal((await add({ ...product, category: 'Invalid' })).body.success, false);
@@ -143,7 +151,7 @@ test('admin product writes persist, validate input, and enforce customer permiss
 
 test('customer cart creation, duplicate rejection, update and retrieval use MongoDB', async () => {
     assert.deepEqual((await request('/get-cart', { cookie: customerCookie })).body, { success: true });
-    const create = cookie => request('/create-cart', { method: 'POST', body: { products: [] }, cookie });
+    const create = (cookie: string) => request('/create-cart', { method: 'POST', body: { products: [] }, cookie });
     assert.equal((await create(adminCookie)).body.success, false);
     const created = (await create(customerCookie)).body;
     assert.equal(created.success, true);
@@ -152,12 +160,12 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
     assert.equal((await create(customerCookie)).body.success, false);
     assert.equal(await Cart.countDocuments({}), 1);
     const product = await Product.findOne({});
-    const products = [{ id: String(product._id), quantity: 2 }];
+    const products = [{ id: String(product._id), count: 2, price: product.price }];
     assert.equal((await request('/update-cart', {
         method: 'POST', cookie: customerCookie, body: { products }
     })).body.success, false);
     assert.equal((await request('/update-cart', {
-        method: 'POST', cookie: customerCookie, body: { id: created.id, products }
+        method: 'POST', cookie: customerCookie, body: { id: created.id, products: [{ ...products[0], price: -100 }] }
     })).body.success, true);
     const cart = (await request('/get-cart', { cookie: customerCookie })).body.cart;
     assert.equal(cart.id, created.id);
@@ -166,9 +174,76 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
     assert.equal((await request('/total-orders', { cookie: customerCookie })).body.ordersCount, 0);
 });
 
+test('concurrent cart creation allows one open cart while preserving closed carts', async () => {
+    const userId = Number(registration.id);
+    await Cart.updateMany({ user_id: userId, status: 1 }, { $set: { status: 0 } });
+    const closedCount = await Cart.countDocuments({ user_id: userId, status: 0 });
+    const results = await Promise.all(Array.from({ length: 10 }, () => request('/create-cart', {
+        method: 'POST', cookie: customerCookie, body: { products: [] }
+    })));
+    assert.equal(results.filter(result => result.body.success).length, 1);
+    assert.equal(results.filter(result => result.body.success === false).length, 9);
+    assert.equal(await Cart.countDocuments({ user_id: userId, status: 1 }), 1);
+    assert.equal(await Cart.countDocuments({ user_id: userId, status: 0 }), closedCount);
+    await assert.rejects(Cart.create({ user_id: userId, products: [], status: 1 }),
+        (error: any) => error.code === 11000);
+    await Cart.create({ user_id: userId + 1, products: [], status: 1 });
+});
+
+test('checkout saves shipping and demo payment once, closes the cart, and survives retries', async () => {
+    const cart = await Cart.findOne({ user_id: Number(registration.id), status: 1 });
+    const product = await Product.findOne({});
+    await Cart.updateOne({ _id: cart._id }, { $set: { products: [{ id: String(product._id), count: 2, price: -1 }] } });
+    const body = { cartId: String(cart._id), shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' }, payment: { method: 'credit_card', last4: '4242' }, total: 0.01 };
+    assert.equal((await request('/checkout', { method: 'POST', cookie: adminCookie, body })).body.success, false);
+    assert.equal((await request('/checkout', { method: 'POST', cookie: customerCookie, body: { ...body, shipping: { ...body.shipping, date: '2000-01-01' } } })).body.success, false);
+    assert.equal((await Cart.findById(cart._id)).status, 1);
+    const results = await Promise.all(Array.from({ length: 5 }, () => request('/checkout', { method: 'POST', cookie: customerCookie, body })));
+    assert.ok(results.every(result => result.body.success));
+    assert.equal(new Set(results.map(result => result.body.order.id)).size, 1);
+    assert.equal(await Order.countDocuments({ cart_id: body.cartId }), 1);
+    const order = await Order.findOne({ cart_id: body.cartId }).lean();
+    assert.equal(order.price, product.price * 2);
+    assert.equal(order.shipping.city, body.shipping.city);
+    assert.equal(order.shipping.date.toISOString().slice(0, 10), body.shipping.date);
+    assert.deepEqual(order.payment, { mode: 'demo', method: 'credit_card', last4: '4242' });
+    assert.equal(order.credit_card, undefined);
+    assert.equal((await Cart.findById(cart._id)).status, 0);
+    assert.equal((await request('/get-cart', { cookie: customerCookie })).body.cart, undefined);
+    assert.equal((await request('/get-last-order', { cookie: customerCookie })).body.order._id, String(order._id));
+    const repeated = await request('/checkout', { method: 'POST', cookie: customerCookie, body });
+    assert.equal(repeated.body.order.id, String(order._id));
+    assert.equal((await request('/create-cart', { method: 'POST', cookie: customerCookie, body: { products: [] } })).body.success, true);
+});
+
+test('administrator uploads persist in MinIO and are publicly served by the app', async () => {
+    const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
+    const form = new FormData();
+    form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
+    const upload = await fetch(base + '/upload-product-image', {
+        method: 'POST', headers: { Cookie: adminCookie }, body: form,
+        signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(upload.status, 200);
+    const result = await upload.json();
+    assert.match(result.image, /^\/products\/uploads\/[a-f0-9-]+\.png$/);
+    const client = createStorageClient();
+    try {
+        const object = await client.send(new HeadObjectCommand({
+            Bucket: process.env['S3_BUCKET'] || 'product-images', Key: result.image.split('/').pop(),
+        }));
+        assert.equal(object.ContentLength, bytes.length);
+    } finally { client.destroy(); }
+    const image = await fetch(base + result.image, { signal: AbortSignal.timeout(5000) });
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
+});
+
 test('logout expires the browser session cookie', async () => {
     const logout = await request('/logout', { cookie: customerCookie });
     assert.equal(logout.body.success, true);
+    assert.ok(logout.cookie, 'Logout must expire the session cookie');
     assert.match(logout.cookie, /SESSIONID=;/);
     assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
     assert.equal((await request('/reconect')).body.success, false);

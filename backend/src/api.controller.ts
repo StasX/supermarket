@@ -1,8 +1,7 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Post, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { ImageStorageService } from './image-storage.service';
 import { AuthService } from './auth.service';
 import { ShopService } from './shop.service';
 import { Public, Role, SessionGuard } from './session.guard';
@@ -10,7 +9,14 @@ import { Public, Role, SessionGuard } from './session.guard';
 @Controller()
 @UseGuards(SessionGuard)
 export class ApiController {
-  constructor(private readonly auth: AuthService, private readonly shop: ShopService) {}
+  constructor(private readonly auth: AuthService, private readonly shop: ShopService, private readonly images: ImageStorageService) {}
+
+  @Public() @Get('products/uploads/:filename')
+  async productImage(@Param('filename') filename: string) {
+    const stream = await this.images.get(filename);
+    const type = filename.endsWith('.png') ? 'image/png' : filename.endsWith('.jpg') ? 'image/jpeg' : 'image/webp';
+    return new StreamableFile(stream, { type });
+  }
 
   @Public() @Post('login') @HttpCode(200)
   login(@Body() body: any, @Res({ passthrough: true }) response: any) { return this.auth.login(body, response); }
@@ -55,10 +61,8 @@ export class ApiController {
       bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null
     );
     if (!extension) throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
-    const directory = join(__dirname, '..', 'static', 'products', 'uploads');
-    await mkdir(directory, { recursive: true });
     const filename = `${randomUUID()}.${extension}`;
-    await writeFile(join(directory, filename), bytes, { flag: 'wx' });
+    await this.images.put(filename, bytes, extension === 'jpg' ? 'image/jpeg' : `image/${extension}`);
     return { success: true, image: `/products/uploads/${filename}` };
   }
 
@@ -79,4 +83,7 @@ export class ApiController {
 
   @Role(0) @Get('get-last-order')
   lastOrder(@Req() request: any) { return this.shop.lastOrder(request.user_data); }
+
+  @Role(0) @Post('checkout') @HttpCode(200)
+  checkout(@Req() request: any, @Body() body: any) { return this.shop.checkout(request.user_data, body); }
 }
