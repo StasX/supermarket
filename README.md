@@ -83,6 +83,12 @@ The storefront, customer checkout flow, and administrator workspace are shown be
 
 ![Administrator workspace for editing a product](docs/screenshots/admin/store-edit-product.png)
 
+**Delete a product**
+
+Choose **Delete** to open a confirmation naming the product. Select **Yes** to remove it or **No** to cancel.
+
+![Administrator product deletion confirmation dialog](docs/screenshots/admin/store-delete-product.png)
+
 </details>
 
 ## Database setup
