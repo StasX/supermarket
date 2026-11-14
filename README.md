@@ -273,6 +273,7 @@ API paths are relative to the backend origin (`http://localhost:3000` by default
 | ------ | --------------------------- | ------------------------- |
 | POST   | `/add-product`              | Create a product.         |
 | POST   | `/edit-product`             | Edit a product.           |
+| POST   | `/delete-product`           | Delete a product (admin). |
 | POST   | `/upload-product-image`     | Upload a product image.   |
 | POST   | `/find-product`             | Find products by name.    |
 | GET    | `/get-all-products`         | Get all products.         |
@@ -300,6 +301,8 @@ Response:
 ```
 
 For `/edit-product`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must be nonnegative, have exactly two decimal places, and fit within safe integer cents. Send prices as strings (for example, `"10.00"`) to preserve trailing zeros. Category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
+
+`POST /delete-product` requires an administrator session and a valid CSRF token. Send `{ "id": "<product ObjectId>" }`. It returns `{ "success": true }` when a product is deleted, or `{ "success": false }` for an invalid or missing product. Customers receive HTTP 403. In the product manager, **Delete** opens a confirmation naming the product; **Yes** deletes it and refreshes the catalog, while **No** or Escape cancels. Saved orders and invoice snapshots are preserved. An open cart containing a deleted product must be updated before checkout.
 
 `POST /upload-product-image` also requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/uploads/<generated-filename>" }`. Use that URL as the product's `image` field.
 

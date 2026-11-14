@@ -97,6 +97,12 @@ export class ProductsService {
     return { success: true };
   }
 
+  async deleteProduct(body: Pick<ProductInput, 'id'>) {
+    if (!isValidProductOrCartId(body?.id)) return { success: false };
+    const deleted = await this.models.products.findByIdAndDelete(body.id);
+    return { success: Boolean(deleted) };
+  }
+
   async count() {
     return { success: true, productsCount: await this.models.products.countDocuments({}) };
   }

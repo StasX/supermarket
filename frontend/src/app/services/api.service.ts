@@ -91,6 +91,10 @@ export class ApiService {
     );
   }
 
+  deleteProduct(id: string) {
+    return firstValueFrom(this.http.post<Result>('/delete-product', { id }));
+  }
+
   uploadProductImage(file: File) {
     const body = new FormData();
     body.append('image', file);

@@ -276,3 +276,50 @@ test('redesigned login and storefront fit desktop and mobile screens', async ({
   }
   await page.screenshot({ path: testInfo.outputPath('store-mobile.png'), fullPage: true });
 });
+
+test('administrator confirms product deletion and can cancel without changing the catalog', async ({
+  page,
+}) => {
+  let products = [
+    { id: 'p1', name: 'Edam', category: 'Milk & Eggs', price: 5.25, image: '/products/edam.png' },
+  ];
+  let deletes = 0;
+  await page.route('**/reconect', (route) =>
+    route.fulfill({ json: { success: true, role: 1, user: 'admin', name: 'Shop Admin' } }),
+  );
+  await page.route('**/get-all-products', (route) =>
+    route.fulfill({ json: { success: true, products } }),
+  );
+  await page.route('**/delete-product', async (route) => {
+    deletes++;
+    expect(route.request().postDataJSON()).toEqual({ id: 'p1' });
+    expect(route.request().headers()['x-xsrf-token']).toBeTruthy();
+    if (deletes === 1) {
+      await route.fulfill({ status: 500, json: { success: false } });
+      return;
+    }
+    products = [];
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.goto('/#/management');
+  await page.getByRole('button', { name: 'Edit Edam' }).click();
+  await page.getByRole('button', { name: 'Delete Edam', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete product?' });
+  await expect(dialog).toContainText('Are you realy want to delete Edam?');
+  await dialog.getByRole('button', { name: 'No', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(deletes).toBe(0);
+  await expect(page.getByRole('button', { name: 'Delete Edam', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete Edam', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Yes', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Unable to delete the product');
+  await expect(page.locator('.products .product')).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'Yes', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.products .product')).toHaveCount(0);
+  await expect(page.getByLabel('Product name')).toHaveValue('');
+  await expect(page.getByText('Edam deleted.', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.products .product')).toHaveCount(0);
+  expect(deletes).toBe(2);
+});

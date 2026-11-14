@@ -13,6 +13,7 @@ export class ProductCardComponent {
   readonly disabled = input(false);
   readonly mode = input<'shop' | 'manage'>('shop');
   readonly selected = output<Product>();
+  readonly deleteRequested = output<Product>();
   imageError(event: Event) {
     const image = event.target as HTMLImageElement;
     if (!image.src.endsWith('/assets/img/market-basket.svg')) {

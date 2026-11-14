@@ -98,7 +98,13 @@ const key = 'test-only-session-signing-key';
 let app: INestApplication;
 type Collection = 'users' | 'products' | 'carts' | 'orders';
 type ModelMethod =
-  'find' | 'findOne' | 'create' | 'countDocuments' | 'findByIdAndUpdate' | 'findOneAndUpdate';
+  | 'find'
+  | 'findOne'
+  | 'create'
+  | 'countDocuments'
+  | 'findByIdAndUpdate'
+  | 'findByIdAndDelete'
+  | 'findOneAndUpdate';
 type MockModels = Record<Collection, Record<ModelMethod, jest.Mock<(...args: any[]) => any>>>;
 let models: MockModels;
 let directory: string;
@@ -730,6 +736,7 @@ beforeAll(async () => {
           'create',
           'countDocuments',
           'findByIdAndUpdate',
+          'findByIdAndDelete',
           'findOneAndUpdate',
         ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
       ),
@@ -953,6 +960,7 @@ test('logout clears the session cookie', async () => {
 for (const [method, route, allowedRole] of [
   ['post', 'add-product', 1],
   ['post', 'edit-product', 1],
+  ['post', 'delete-product', 1],
   ['get', 'get-last-order', 0],
   ['get', 'total-orders', 0],
   ['get', 'total-products', 0],
@@ -1411,4 +1419,41 @@ describe.each(['create-cart', 'update-cart'])('%s validates cart contents', (rou
 
 test('unknown endpoints return 404', async () => {
   await api().get('/unknown').expect(404);
+});
+
+test.each([undefined, '', 'invalid', { $ne: null }])(
+  'product deletion rejects invalid id %j',
+  async (id) => {
+    const response = await api()
+      .post('/delete-product')
+      .set('Cookie', cookie(admin))
+      .send({ id })
+      .expect(200);
+    expect(response.body).toEqual({ success: false });
+    expect(models.products.findByIdAndDelete).not.toHaveBeenCalled();
+  },
+);
+
+test.each([true, false])(
+  'product deletion reports whether a product was removed (%s)',
+  async (exists) => {
+    models.products.findByIdAndDelete.mockResolvedValue(exists ? { _id: customer._id } : null);
+    const response = await api()
+      .post('/delete-product')
+      .set('Cookie', cookie(admin))
+      .send({ id: customer._id })
+      .expect(200);
+    expect(response.body).toEqual({ success: exists });
+    expect(models.products.findByIdAndDelete).toHaveBeenCalledWith(customer._id);
+  },
+);
+
+test('product deletion rejects anonymous and unverified requests', async () => {
+  await api().post('/delete-product').send({ id: customer._id }).expect(401);
+  await request(app.getHttpServer())
+    .post('/delete-product')
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id })
+    .expect(403);
+  expect(models.products.findByIdAndDelete).not.toHaveBeenCalled();
 });

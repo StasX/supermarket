@@ -155,6 +155,13 @@ export class ApiController {
   }
 
   @Role(1)
+  @Post('delete-product')
+  @HttpCode(200)
+  deleteProduct(@Body() body: ProductInput) {
+    return this.productsService.deleteProduct(body);
+  }
+
+  @Role(1)
   @Post('upload-product-image')
   @HttpCode(200)
   @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))

@@ -519,3 +519,36 @@ test('logout expires the browser session cookie', async () => {
   assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
   assert.equal((await request('/reconect', { status: 401 })).body.success, false);
 });
+
+test('only administrators can delete products and deletion persists in MongoDB', async () => {
+  const product = await Product.create({
+    name: 'Disposable product',
+    category: 'Milk & Eggs',
+    price: 1.25,
+    image: '/products/edam.png',
+  });
+  const body = { id: String(product._id) };
+  const login = await request('/login', {
+    method: 'POST',
+    body: { username: registration.email, password },
+  });
+  const activeCustomerCookie = login.cookie!.split(';')[0];
+  await request('/delete-product', {
+    method: 'POST',
+    body,
+    cookie: activeCustomerCookie,
+    status: 403,
+  });
+  assert.ok(await Product.findById(product._id));
+  assert.equal(
+    (await request('/delete-product', { method: 'POST', body, cookie: adminCookie })).body.success,
+    true,
+  );
+  assert.equal(await Product.findById(product._id), null);
+  const catalog = (await request('/get-all-products', { cookie: adminCookie })).body;
+  assert.ok(!catalog.products.some((item: { id: string }) => item.id === body.id));
+  assert.equal(
+    (await request('/delete-product', { method: 'POST', body, cookie: adminCookie })).body.success,
+    false,
+  );
+});

@@ -13,6 +13,7 @@
   "/find-product": { "target": "http://localhost:3000" },
   "/add-product": { "target": "http://localhost:3000" },
   "/edit-product": { "target": "http://localhost:3000" },
+  "/delete-product": { "target": "http://localhost:3000" },
   "/create-cart": { "target": "http://localhost:3000" },
   "/update-cart": { "target": "http://localhost:3000" }
 }
