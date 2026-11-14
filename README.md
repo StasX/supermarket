@@ -25,7 +25,7 @@ The seeded demo administrator credentials are:
 ```text
 backend/
   src/         NestJS controllers, services, guard, module, and MongoDB models
-  tests/       Jest HTTP tests using NestJS and mocked MongoDB models
+  tests/       Jest HTTP tests with mocked models and real MongoDB/MinIO integration tests
 frontend/
   src/         Angular 22 standalone components, services, forms, routes, and unit tests
   e2e/         Playwright browser tests
@@ -33,6 +33,12 @@ db/
   Dockerfile   MongoDB image definition
   01-import.sh Database initialization script
   seeds/       Database seed collections
+integration_tests/
+  Dockerfile   Non-root integration-test runner
+minio/
+  Dockerfile   MinIO server built from pinned source
+.github/
+  workflows/   Tests, security scans, and report artifacts
 ```
 
 Use Node.js 26.13.1 LTS (`.nvmrc`), also pinned in Docker and GitHub Actions. All project manifests require the Node.js 26 line starting at 26.13.1; Node.js 25 is unsupported. Install dependencies with `npm ci --prefix backend` and `npm ci --prefix frontend`, then run `npm start` after setting up MongoDB and a session signing key. Startup builds the Angular application into `frontend/dist/browser` and compiles NestJS into `backend/dist`. NestJS serves the built frontend and API at `http://localhost:3000`, keeping session cookies on the same origin.
@@ -55,7 +61,7 @@ The backend uses NestJS 12 with its Express HTTP adapter and TypeScript 7. It ke
 
 ## Docker
 
-Start MongoDB and the application from the project root:
+Copy `.env.example` to `.env`, choose your MinIO credentials, then start MongoDB, MinIO, and the application from the project root:
 
 ```sh
 docker compose up --build -d --wait
@@ -79,7 +85,7 @@ The backend accepts `MONGODB_URI` (defaults to `mongodb://localhost:27017/shop`)
 
 Copy `.env.example` to `.env` in the repository root before starting Compose. Compose reads `PORT`, `MONGODB_URI`, `JWT_KEY_PATH`, and `MONGO_INITDB_DATABASE` using `${VARIABLE}` interpolation. The example values are configured for Docker; `PORT` controls both the published port and the application listener. Keep the database name as `shop` to match the seed import script.
 
-For local `npm start`, change `MONGODB_URI` to `mongodb://localhost:27017/shop` and `JWT_KEY_PATH` to the path of an existing local signing key (for example, `backend/src/key.pem`). The backend also loads the root `.env` automatically, regardless of the working directory, using the configured Node.js 26 runtime. Existing environment variables take precedence; a missing `.env` is allowed. `.env` is ignored by Git and excluded from Docker images.
+For local `npm start`, change `MONGODB_URI` to `mongodb://localhost:27017/shop` and set `JWT_KEY_PATH` to the absolute path of an existing local signing key. Relative key paths resolve from the backend process's working directory, normally `backend`, so `src/key.pem` refers to the key generated above. The backend also loads the root `.env` automatically, regardless of the working directory, using the configured Node.js 26 runtime. Existing environment variables take precedence; a missing `.env` is allowed. `.env` is ignored by Git and excluded from Docker images.
 
 ## Formatting
 
@@ -125,13 +131,32 @@ docker compose -p supermarket-integration -f integration.compose.yml up --build 
 docker compose -p supermarket-integration -f integration.compose.yml down --volumes
 ```
 
-The suite uses isolated MongoDB and MinIO containers with temporary data and a separate signing key. Its S3 settings and disposable credentials live in `integration_tests/.env.integration`, independently of the local `.env`. It also verifies that uploaded images exist in MinIO and are served through the API. GitHub Actions runs it in the integration job on pushes, pull requests, and manual runs, and always cleans up the containers.
+The suite uses isolated MongoDB and MinIO containers with temporary data and a separate signing key. Its S3 settings and disposable credentials live in `integration_tests/.env.integration`, independently of the local `.env`. It also verifies concurrent checkout, invoice persistence and ownership, and uploaded images served through the API. The test runner runs as the non-root `node` user. It explicitly uses `HEALTHCHECK NONE` with a documented `CKV_DOCKER_2` exception: this is a one-shot process whose exit code determines success, rather than a long-running service. MongoDB and MinIO retain their health checks. GitHub Actions runs the suite in the integration job and always cleans up the containers.
 
-With Docker Compose running and Google Chrome installed, run `npm --prefix frontend run test:e2e` for Playwright browser tests. Customer signup/cart operations use mocked API responses to avoid changing database records. The administrator smoke test uses the documented demo login against the running backend and reads products without editing them. Override `E2E_BASE_URL` if the app is not on port 3000. For Playwright's bundled browser, install Chromium with `npx --prefix frontend playwright install chromium` and set `PLAYWRIGHT_CHANNEL=chromium`. Browser tests are separate from the default CI unit/HTTP suites.
+With Docker Compose running and Google Chrome installed, run `npm --prefix frontend run test:e2e` for Playwright browser tests. Customer signup/cart operations and administrator image editing use mocked API responses to avoid changing database records. The administrator smoke test uses the documented demo login against the running backend and reads products without editing them. Override `E2E_BASE_URL` if the app is not on port 3000. For Playwright's bundled browser, run `npx playwright install chromium` from `frontend` and set `PLAYWRIGHT_CHANNEL=chromium`. Tests write HTML reports to `frontend/playwright-report` and JUnit XML to `frontend/test-results/junit.xml`, retaining traces and screenshots on failure. They run in their own CI job with Chromium and a fresh Compose deployment; CI retries failed tests twice and rejects focused `test.only` tests.
+
+## Continuous integration and security scans
+
+[`.github/workflows/main.yml`](.github/workflows/main.yml) runs on pushes, pull requests, and manual dispatches. Jobs run independently:
+
+| Job                 | Scope and output                                                                                                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit/HTTP tests     | Angular and NestJS tests, test logs, and compiled frontend/backend builds.                                                                                                                    |
+| Integration tests   | Real MongoDB and MinIO, including checkout and invoices; test logs and container diagnostics.                                                                                                 |
+| Playwright          | Browser flows against the application; HTML/JUnit reports, failure traces/screenshots, and container diagnostics.                                                                             |
+| CodeQL              | Backend/frontend TypeScript with extended security queries, configured in [`.github/codeql-config.yml`](.github/codeql-config.yml); SARIF results.                                            |
+| NodeJsScan          | Compiled backend JavaScript in `backend/dist`; SARIF results. TypeScript is compiled first because the scanner's default file selection targets JavaScript.                                   |
+| Semgrep TypeScript  | `p/typescript` rules against `backend/src` and `frontend/src`; JSON results and logs.                                                                                                         |
+| npm audit           | Separate root, backend, and frontend lockfile audits, including development dependencies; JSON results and logs.                                                                              |
+| Dockerfile security | Independent Checkov, Semgrep (`p/dockerfile`), and Trivy configuration scans of `Dockerfile`, `db/Dockerfile`, `minio/Dockerfile`, and `integration_tests/Dockerfile`; JSON results and logs. |
+
+Reports upload as workflow artifacts even when their scan/test step fails and are retained for 14 days. Files are available only if the producing step reached report generation. CodeQL and NodeJsScan also upload SARIF to GitHub code scanning, which must be enabled for the repository. CodeQL reports alerts; it does not automatically fail the job solely because alerts exist. Semgrep fails on findings or scan errors, NodeJsScan fails on warning/error findings, and Checkov/Trivy fail on unsuppressed findings.
+
+npm audit uses `--audit-level=moderate`: moderate, high, and critical findings fail the job; info and low findings remain in the report without failing it. This threshold applies only to npm audit. Jest remains on version 30; scoped dependency overrides select patched `glob` and `minimatch` releases. The outstanding low-severity `deepmerge` advisory in Jest's dependency tree is still reported, not fixed by the threshold. Do not use `npm audit fix --force` to resolve it by downgrading Jest.
 
 ## API reference
 
-API paths are relative to the backend origin (`http://localhost:3000` by default). Only `/login` and `/sign-up` are public API endpoints. All other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
+API paths are relative to the backend origin (`http://localhost:3000` by default). `/login`, `/sign-up`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
 
 ### Products
 
@@ -165,7 +190,7 @@ Response:
 }
 ```
 
-For `/edit-product`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must have exactly two decimal places, and category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
+For `/edit-product`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must be nonnegative, have exactly two decimal places, and fit within safe integer cents. Send prices as strings (for example, `"10.00"`) to preserve trailing zeros. Category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
 
 `POST /upload-product-image` also requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/uploads/<generated-filename>" }`. Use that URL as the product's `image` field.
 
@@ -238,7 +263,7 @@ Request:
 ```json
 {
   "username": "j.smith@example.com",
-  "password": "P@ssw0rd"
+  "password": "sec907@Ad0"
 }
 ```
 
@@ -301,7 +326,7 @@ Response:
 }
 ```
 
-The ID must contain nine digits and the password must contain at least eight characters. New accounts always receive customer role `0`. Failed signup returns `{ "created": false, "reason": "..." }`.
+The ID must contain nine digits and the password must contain at least eight characters. Names and cities accept Unicode letters, combining marks, spaces, apostrophes, and hyphens, without requiring capitalization. Streets also accept numbers and common address punctuation (`.`, `,`, `/`, `#`). These fields are limited to 150 characters; empty or malformed values are rejected. The city field accepts typed values with suggestions. New accounts always receive customer role `0`. Failed signup returns `{ "created": false, "reason": "..." }`.
 
 ### Statistics
 
@@ -355,7 +380,7 @@ Login allows 20 requests and signup allows 5 requests per connection peer IP add
 
 ## Demo checkout
 
-Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, street, today or a future shipping date, cardholder name, any 16-digit card number (spaces are allowed), a valid future expiry (`MM/YY`), and any three-digit security code. No charge is made. The browser sends only the card number's last four digits; the full number, expiry, cardholder name, and security code are never sent to the backend or stored in the database.
+Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, street, today or a future shipping date, cardholder name, any 16-digit card number (spaces are allowed), a current or future expiry month (`MM/YY`), and any three-digit security code. Shipping city and street accept international text, apostrophes, and hyphens, with a 150-character limit each. No charge is made. The browser sends only the card number's last four digits; the full number, expiry, cardholder name, and security code are never sent to the backend or stored in the database.
 
 `POST /checkout` requires a customer session and accepts:
 
