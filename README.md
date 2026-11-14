@@ -2,6 +2,89 @@
 
 Setup instructions and API reference for the Angular frontend, NestJS backend, and MongoDB database.
 
+## Screenshots
+
+The storefront, customer checkout flow, and administrator workspace are shown below.
+
+![Storefront with product categories, product cards, and shopping cart](docs/screenshots/user/store-top.png)
+
+<details>
+<summary>Sign in and signup</summary>
+
+**Sign in**
+
+![Sign-in page](docs/screenshots/user/signin.png)
+
+**Signup: account details**
+
+![First signup step for account details](docs/screenshots/user/signup1.png)
+
+**Signup: personal details**
+
+![Second signup step for personal details](docs/screenshots/user/signup2.png)
+
+</details>
+
+<details>
+<summary>Customer welcome and shopping history</summary>
+
+**First visit**
+
+![Welcome page for a new customer](docs/screenshots/user/first-welcome.png)
+
+**Returning customer with an open cart**
+
+![Welcome page showing an open cart](docs/screenshots/user/welcome-back-open-cart.png)
+
+**Returning customer with a previous order**
+
+![Welcome page showing the latest order](docs/screenshots/user/welcome-back-last-order.png)
+
+</details>
+
+<details>
+<summary>Shopping and order review</summary>
+
+**More of the storefront**
+
+![Lower section of the storefront](docs/screenshots/user/store-bottom.png)
+
+**Order review**
+
+![Order review with products, quantities, and totals](docs/screenshots/user/order-review.png)
+
+</details>
+
+<details>
+<summary>Checkout, confirmation, and invoice</summary>
+
+**Checkout**
+
+![Checkout page with shipping and demo payment details](docs/screenshots/user/checkout.png)
+
+**Order confirmation**
+
+![Order confirmation with an invoice download link](docs/screenshots/user/order-success.png)
+
+**Invoice**
+
+![Generated order invoice](docs/screenshots/user/invoice.png)
+
+</details>
+
+<details>
+<summary>Administrator product management</summary>
+
+**Add a product**
+
+![Administrator workspace for adding a product](docs/screenshots/admin/store-add-product.png)
+
+**Edit a product**
+
+![Administrator workspace for editing a product](docs/screenshots/admin/store-edit-product.png)
+
+</details>
+
 ## Database setup
 
 Create a database named `shop` and import the collections from the [db/seeds](db/seeds/) directory:
@@ -50,6 +133,8 @@ frontend/
     tests/      Frontend unit and rendering tests
   src/styles/  Global SCSS partials for theme, base elements, forms, layouts, and feature styling
   e2e/         Playwright browser tests
+docs/
+  screenshots/ Customer and administrator screenshots used in this README
 db/
   Dockerfile   MongoDB image definition
   01-import.sh Database initialization script
