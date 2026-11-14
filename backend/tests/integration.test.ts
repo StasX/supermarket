@@ -325,7 +325,8 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
     total: 0.01,
   };
   assert.equal(
-    (await request('/checkout', { method: 'POST', cookie: adminCookie, body })).body.success,
+    (await request('/checkout', { method: 'POST', cookie: adminCookie, body, status: 403 })).body
+      .success,
     false,
   );
   assert.equal(
