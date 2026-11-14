@@ -1,0 +1,63 @@
+@use 'variables' as *;
+
+/* Base elements and typography */
+
+:root {
+  color-scheme: light;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  color: $ink;
+  background: linear-gradient(145deg, $background 0%, #eef5dc 55%, #f4f8e9 100%);
+  background-attachment: fixed;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+a {
+  color: $primary;
+  text-underline-offset: 4px;
+}
+
+.return-link {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+.button,
+a {
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+:focus-visible {
+  outline: 3px solid $focus;
+  outline-offset: 4px;
+}

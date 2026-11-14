@@ -1,8 +1,8 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideHttpClient } from '@angular/common/http';
 import { provideRouter, withHashLocation } from '@angular/router';
-import { AppComponent } from './app/app.component';
-import { routes } from './app/app.routes';
+import { AppComponent } from './app/components/app/app.component';
+import { routes } from './app/routes/app.routes';
 
 // Retain bookmarks from AngularJS's hashbang router.
 if (location.hash.startsWith('#!')) location.replace(location.href.replace('#!', '#'));

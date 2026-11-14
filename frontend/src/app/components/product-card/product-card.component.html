@@ -1,0 +1,25 @@
+<div class="product-media">
+  <img [src]="product().image" [alt]="product().name" loading="lazy" (error)="imageError($event)" />
+</div>
+<div class="product-body">
+  <span class="product-category">{{ product().category }}</span>
+  <h2>{{ product().name }}</h2>
+  @if (mode() === 'shop') {
+    <div class="product-bottom">
+      <p>{{ product().price | currency: 'USD' }}</p>
+      <button type="button" (click)="selected.emit(product())" [disabled]="disabled()">
+        Add to cart <span aria-hidden="true">+</span>
+      </button>
+    </div>
+  } @else {
+    <p class="product-price">{{ product().price | currency: 'USD' }}</p>
+    <button
+      class="secondary"
+      type="button"
+      (click)="selected.emit(product())"
+      [disabled]="disabled()"
+    >
+      Edit {{ product().name }} <span aria-hidden="true">↗</span>
+    </button>
+  }
+</div>

@@ -1,0 +1,27 @@
+<ng-container [formGroup]="form()">
+  <legend>Shipping details</legend>
+  <p class="hint">
+    Addresses can use any language, apostrophes, and hyphens (up to 150 characters).
+  </p>
+  <div class="checkout-fields">
+    <label
+      >City<input
+        formControlName="city"
+        (dblclick)="autofill.emit('city')"
+        autocomplete="shipping address-level2"
+        maxlength="150"
+        required
+    /></label>
+    <label
+      >Street<input
+        formControlName="street"
+        (dblclick)="autofill.emit('street')"
+        autocomplete="shipping street-address"
+        maxlength="150"
+        required
+    /></label>
+    <label
+      >Shipping date<input type="date" formControlName="date" [min]="today()" required
+    /></label>
+  </div>
+</ng-container>

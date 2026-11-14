@@ -1,0 +1,23 @@
+/* Theme colors and gradients */
+$ink: #293b1d;
+$primary: #496d20;
+$muted: #6d785c;
+$background: #f8faef;
+$line: #dfe7cc;
+$accent: #648728;
+$focus: #a4c65c;
+$surface: #ffffff;
+$surface-translucent: #ffffff60;
+$surface-soft: #edf3df;
+$surface-active: #e5efd1;
+$on-primary: #ffffff;
+$input-background: #fbfcf6;
+$input-line: #d4dfbf;
+$focus-ring: #97b94e20;
+$primary-hover: #365317;
+$action-hover-gradient: linear-gradient(110deg, $primary-hover, $primary);
+$error-text: #9a3b27;
+$error-background: #fceee7;
+$error-border: #ba5b45;
+$theme-gradient: linear-gradient(130deg, #e4efc8 0%, #c3d993 52%, #dcebb9 100%);
+$action-gradient: linear-gradient(110deg, #46691e 0%, #567d26 65%, #60872d 100%);

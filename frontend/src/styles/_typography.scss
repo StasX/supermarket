@@ -1,0 +1,37 @@
+@use 'variables' as *;
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1,
+h2 {
+  letter-spacing: -0.045em;
+}
+
+h1 {
+  font-family: Georgia, serif;
+  font-size: clamp(2.2rem, 4vw, 3.2rem);
+  font-weight: 500;
+}
+
+h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+em {
+  color: $accent;
+  font-weight: inherit;
+}
+
+.eyebrow {
+  display: block;
+  color: $muted;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1.6;
+}

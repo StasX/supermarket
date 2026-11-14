@@ -1,7 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
-import { CanActivateFn, Router } from '@angular/router';
-import { ApiService, User, Result } from './api.service';
+import { ApiService } from './api.service';
+import { User, Result } from '../models/api.models';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -76,9 +76,3 @@ export class AuthService {
     this.user.set(null);
   }
 }
-export const sessionGuard: CanActivateFn = async (route) => {
-  const auth = inject(AuthService);
-  const router = inject(Router);
-  const user = await auth.reconnect();
-  return user && user.role === route.data['role'] ? true : router.parseUrl('/login');
-};

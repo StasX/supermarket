@@ -1,5 +1,6 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { ApiService, CartItem, Product } from './api.service';
+import { ApiService } from './api.service';
+import { CartItem, Product } from '../models/api.models';
 
 @Injectable({ providedIn: 'root' })
 export class CartService {

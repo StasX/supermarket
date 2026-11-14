@@ -1,0 +1,43 @@
+<div class="auth-layout">
+  <aside class="auth-story">
+    <span class="eyebrow">THE EVERYDAY, MADE BETTER</span>
+    <h2>Good food.<br />Great little<br /><em>moments.</em></h2>
+    <p>Fill your basket with favourites.<br />Make room for something delicious.</p>
+    <img
+      class="market-art"
+      src="assets/img/market-basket.svg"
+      alt="An illustrated basket of fresh groceries"
+    />
+    <div class="story-note">
+      <span aria-hidden="true">✳</span><span>A fresh take on your everyday shop.</span>
+    </div>
+  </aside>
+  <section class="panel auth-panel">
+    <span class="eyebrow">WELCOME TO THE NEIGHBOURHOOD</span>
+    <h1>Sign in</h1>
+    <p class="auth-subtitle">Your favourites are just a basket away.</p>
+    <form [formGroup]="form" (ngSubmit)="submit()">
+      <label
+        >Email<input type="email" formControlName="username" autocomplete="username" required
+      /></label>
+      <label
+        >Password<input
+          type="password"
+          formControlName="password"
+          autocomplete="current-password"
+          required
+      /></label>
+      @if (error()) {
+      <p class="error" role="alert">{{ error() }}</p>
+      }
+      <button type="submit" [disabled]="busy()">{{ busy() ? 'Signing in…' : 'Sign in' }}</button>
+    </form>
+    <p class="auth-switch">
+      New customer?
+      <a routerLink="/sign-up">Create an account <span aria-hidden="true">↗</span></a>
+    </p>
+    <div class="form-footnote">
+      <span aria-hidden="true">◈</span> Your next good meal starts here.
+    </div>
+  </section>
+</div>

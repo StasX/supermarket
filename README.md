@@ -28,6 +28,18 @@ backend/
   tests/       Jest HTTP tests with mocked models and real MongoDB/MinIO integration tests
 frontend/
   src/         Angular 22 standalone components, services, forms, routes, and unit tests
+  src/app/
+    components/ One directory per component, with TypeScript and HTML files
+    pages/      One directory per route-level page, with TypeScript and HTML files
+    services/   API, authentication, and cart services
+    models/     API contracts and typed checkout form
+    guards/     Route access guards
+    routes/     Application route definitions
+    validators/ Form validation rules
+    constants/  Product categories
+    utils/      Error formatting
+    tests/      Frontend unit and rendering tests
+  src/styles/  Global SCSS partials for theme, base elements, forms, layouts, and feature styling
   e2e/         Playwright browser tests
 db/
   Dockerfile   MongoDB image definition

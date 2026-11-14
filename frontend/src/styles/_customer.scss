@@ -1,0 +1,60 @@
+@use 'variables' as *;
+
+/* Welcome and shop information */
+
+.intro {
+  position: relative;
+  max-width: 850px;
+  margin: 30px auto;
+  padding: 55px;
+  text-align: center;
+  background: $theme-gradient;
+
+  img {
+    display: block;
+    width: 240px;
+    max-width: 100%;
+    margin: 0 auto 12px;
+  }
+
+  h1 {
+    font-size: clamp(2.2rem, 4vw, 3.5rem);
+  }
+
+  p {
+    max-width: 470px;
+    margin: 0 auto 30px;
+    color: $muted;
+    font-size: 0.9rem;
+    line-height: 1.9;
+  }
+
+  .actions {
+    justify-content: center;
+  }
+}
+
+.stats {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin: 32px 0;
+
+  p {
+    min-width: 180px;
+    background: $surface-soft;
+    padding: 25px 32px;
+    border-radius: 12px;
+    color: $muted;
+    font-size: 0.8rem;
+  }
+
+  strong {
+    display: block;
+    font-family: Georgia, serif;
+    font-size: 3rem;
+    color: $primary;
+    font-weight: 400;
+    margin-bottom: 8px;
+  }
+}

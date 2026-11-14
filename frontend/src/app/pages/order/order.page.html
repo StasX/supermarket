@@ -1,0 +1,35 @@
+<section class="panel">
+  <span class="eyebrow">YOUR GOOD THINGS, ALL TOGETHER</span>
+  <h1>Review your order</h1>
+  @if (cart.busy()) {
+  <p role="status">Loading your cart…</p>
+  } @if (error()) {
+  <p class="error" role="alert">{{ error() }}</p>
+  } @if (cart.lines().length) {
+  <table>
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Quantity</th>
+        <th>Price</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (item of cart.lines(); track item.id) {
+      <tr>
+        <td>{{ item.name }}</td>
+        <td>{{ item.count }}</td>
+        <td>{{ item.price | currency: 'USD' }}</td>
+        <td>{{ item.price * item.count | currency: 'USD' }}</td>
+      </tr>
+      }
+    </tbody>
+  </table>
+  <p class="total">Total: {{ cart.total() | currency: 'USD' }}</p>
+  <a class="button" routerLink="/order/payment">Continue to checkout</a>
+  } @else {
+  <p>Your cart is empty.</p>
+  }
+  <p><a class="return-link" routerLink="/store">Continue shopping</a></p>
+</section>

@@ -1,0 +1,43 @@
+<section class="panel checkout">
+  @if (completed(); as order) {
+  <div class="checkout-success" role="status">
+    <h1>Your order success!</h1>
+    <p>
+      Download invoice
+      <a [href]="order.invoiceUrl" [download]="'invoice-' + order.id + '.pdf'">here</a>.
+    </p>
+  </div>
+  } @else {
+  <span class="eyebrow">THE LAST LITTLE DETAILS</span>
+  <h1>Checkout</h1>
+  @if (loading()) {
+  <p role="status">Loading your order…</p>
+  } @if (error()) {
+  <p class="error" role="alert">{{ error() }}</p>
+  } @if (!loading() && cart.items().length) {
+  <form [formGroup]="form" (ngSubmit)="submit()">
+    <fieldset
+      app-checkout-shipping
+      [form]="form"
+      [today]="today"
+      [disabled]="saving()"
+      (autofill)="autofill($event)"
+    ></fieldset>
+    <fieldset
+      app-checkout-payment
+      [form]="form"
+      [disabled]="saving()"
+      (autofill)="autofill($event)"
+    ></fieldset>
+    <p class="total">Total: {{ cart.total() | currency: 'USD' }}</p>
+    <div class="actions">
+      <button type="submit" [disabled]="saving() || cart.busy()">
+        {{ saving() ? 'Placing order…' : 'Order' }}
+      </button>
+    </div>
+  </form>
+  } @else if (!loading()) {
+  <p>Your cart is empty.</p>
+  <a class="button" routerLink="/store">Return to store</a>
+  } }
+</section>

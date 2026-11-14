@@ -12,22 +12,25 @@ import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { Title } from '@angular/platform-browser';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ApiService, Product } from './api.service';
-import { AuthService, sessionGuard } from './auth.service';
-import { CartService } from './cart.service';
-import { routes } from './app.routes';
-import { AppComponent } from './app.component';
-import { LoginPage, SignupPage } from './auth.pages';
-import { ManagementPage } from './store.pages';
-import { CheckoutPage } from './checkout.page';
-import { CustomerWelcome } from './customer.pages';
+import { ApiService } from '../services/api.service';
+import { Product } from '../models/api.models';
+import { AuthService } from '../services/auth.service';
+import { sessionGuard } from '../guards/session.guard';
+import { CartService } from '../services/cart.service';
+import { routes } from '../routes/app.routes';
+import { AppComponent } from '../components/app/app.component';
+import { LoginPage } from '../pages/login/login.page';
+import { SignupPage } from '../pages/signup/signup.page';
+import { ProductEditorComponent } from '../components/product-editor/product-editor.component';
+import { CheckoutPage } from '../pages/checkout/checkout.page';
+import { CustomerWelcome } from '../components/customer-welcome/customer-welcome.component';
 import {
   emailPattern,
   namePattern,
   streetPattern,
   passwordsMatch,
   priceValidator,
-} from './validators';
+} from '../validators/validators';
 
 const customer = { user: 'u1', name: 'John Smith', role: 0 };
 const product: Product = {
@@ -331,7 +334,7 @@ describe('cart persistence', () => {
 
 describe('Angular rendering and forms', () => {
   it('allows administrators to edit products with server-hosted image URLs', () => {
-    const fixture = TestBed.createComponent(ManagementPage);
+    const fixture = TestBed.createComponent(ProductEditorComponent);
     fixture.componentInstance.edit({ ...product, image: '/products/apple-juice.png' });
     expect(fixture.componentInstance.form.valid).toBe(true);
     fixture.componentInstance.form.controls.image.setValue('/products/../../private.png');

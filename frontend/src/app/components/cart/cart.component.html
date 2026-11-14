@@ -1,0 +1,66 @@
+<section class="panel cart">
+  <div class="cart-heading">
+    <div>
+      <span class="eyebrow">THE GOOD STUFF</span>
+      <h2>My cart</h2>
+    </div>
+    <span class="cart-count">{{ cart.items().length }}</span>
+  </div>
+  @if (cart.busy()) {
+    <p role="status">Saving or loading cart…</p>
+  }
+  @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+  }
+  @if (cart.lines().length) {
+    @for (item of cart.lines(); track item.id) {
+      <div class="cart-line">
+        <strong>{{ item.name }}</strong><span>{{ item.price | currency: 'USD' }}</span>
+        <label
+          >Quantity<input
+            type="number"
+            min="1"
+            step="1"
+            [ngModel]="item.count"
+            (ngModelChange)="quantity(item.id, $event)"
+            [disabled]="cart.busy()"
+        /></label>
+        <span>{{ item.price * item.count | currency: 'USD' }}</span>
+        <button
+          class="secondary"
+          type="button"
+          (click)="remove(item.id)"
+          [disabled]="cart.busy()"
+          [attr.aria-label]="'Remove ' + item.name"
+        >
+          Remove
+        </button>
+      </div>
+    }
+    <p class="total">
+      Total: <span>{{ cart.total() | currency: 'USD' }}</span>
+    </p>
+    <a class="button" routerLink="/order/cart">Review order <span aria-hidden="true">→</span></a>
+  } @else {
+    <div class="empty-cart">
+      <span class="basket-symbol" aria-hidden="true"
+        ><svg
+          width="36"
+          height="36"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          focusable="false"
+        >
+          <path d="m5 9 4-6m10 6-4-6M3 9h18l-2 11H5L3 9Z" />
+          <path d="M9 13v3m6-3v3M2 9h20" /></svg
+      ></span>
+      <p>Your cart is empty.</p>
+      <small>Something delicious is waiting.<br />Add your first favourite to get started.</small>
+    </div>
+  }
+  <p class="cart-note">A little of what you love, all in one basket.</p>
+</section>

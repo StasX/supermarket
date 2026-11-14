@@ -1,9 +1,14 @@
 import { Routes } from '@angular/router';
-import { LoginPage, SignupPage } from './auth.pages';
-import { sessionGuard } from './auth.service';
-import { AboutPage, InfoPage, OrderPage, WelcomePage } from './customer.pages';
-import { CheckoutPage } from './checkout.page';
-import { ManagementPage, StorePage } from './store.pages';
+import { LoginPage } from '../pages/login/login.page';
+import { SignupPage } from '../pages/signup/signup.page';
+import { sessionGuard } from '../guards/session.guard';
+import { AboutPage } from '../pages/about/about.page';
+import { InfoPage } from '../pages/info/info.page';
+import { OrderPage } from '../pages/order/order.page';
+import { WelcomePage } from '../pages/welcome/welcome.page';
+import { CheckoutPage } from '../pages/checkout/checkout.page';
+import { ManagementPage } from '../pages/management/management.page';
+import { StorePage } from '../pages/store/store.page';
 
 export const routes: Routes = [
   { path: 'login', component: LoginPage, title: 'Login to Dragon shop' },

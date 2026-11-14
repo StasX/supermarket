@@ -1,0 +1,116 @@
+@use 'variables' as *;
+
+/* Product grid and cards */
+
+.products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+
+  > p {
+    color: $muted;
+    padding: 24px 0;
+  }
+}
+
+.product {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px #71952f14;
+  }
+
+  .product-media {
+    display: grid;
+    place-items: center;
+    height: 178px;
+    padding: 25px;
+    background: linear-gradient(145deg, #f2f6e8, #e7efd6);
+
+    img {
+      width: 100%;
+      height: 128px;
+      object-fit: contain;
+      mix-blend-mode: multiply;
+      transition: transform 0.3s ease;
+    }
+  }
+
+  &:nth-child(3n + 2) .product-media {
+    background: linear-gradient(145deg, #f6f9ec, #e5efce);
+  }
+
+  &:nth-child(3n) .product-media {
+    background: linear-gradient(145deg, #edf3dc, #dde9c4);
+  }
+
+  &:hover img {
+    transform: scale(1.06);
+  }
+
+  .product-body {
+    padding: 17px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  .product-category {
+    color: $muted;
+    font-size: 0.53rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  h2 {
+    margin: 9px 0 17px;
+    font-size: 0.92rem;
+    letter-spacing: -0.02em;
+    line-height: 1.45;
+    font-weight: 600;
+  }
+
+  .product-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+
+    p {
+      font-size: 0.95rem;
+      font-weight: 650;
+      margin: 0;
+    }
+
+    button {
+      min-height: 33px;
+      padding: 8px 10px;
+      font-size: 0.6rem;
+      gap: 9px;
+
+      span {
+        font-size: 0.9rem;
+      }
+    }
+  }
+
+  .product-price {
+    font-weight: 650;
+    margin-bottom: 16px;
+  }
+
+  .product-body > button {
+    margin-top: auto;
+    font-size: 0.7rem;
+  }
+}
