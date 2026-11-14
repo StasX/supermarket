@@ -156,7 +156,7 @@ npm audit uses `--audit-level=moderate`: moderate, high, and critical findings f
 
 ## API reference
 
-API paths are relative to the backend origin (`http://localhost:3000` by default). `/login`, `/sign-up`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
+API paths are relative to the backend origin (`http://localhost:3000` by default). `/csrf-token`, `/login`, `/sign-up`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
 
 ### Products
 
@@ -250,7 +250,7 @@ The response has the same `success` and `products` structure shown for `/find-pr
 | Method | Path        | Description                |
 | ------ | ----------- | -------------------------- |
 | POST   | `/login`    | Log in.                    |
-| GET    | `/logout`   | Log out.                   |
+| POST   | `/logout`   | Log out (CSRF protected).  |
 | GET    | `/reconect` | Reconnect a user session.  |
 | POST   | `/sign-up`  | Create a customer account. |
 
@@ -282,9 +282,9 @@ The response's `user` field contains the user's `_id`. Successful login sets an 
 
 #### Log out
 
-`GET /logout`
+`POST /logout`
 
-No request parameters are documented.
+Send an empty JSON body with the CSRF header described below. `GET /logout` is no longer supported.
 
 Response:
 
@@ -373,6 +373,14 @@ A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces 
 The customer welcome page shows the open cart (including an empty open cart), its contents, total, and creation date labeled **Created at**. Without an open cart, it shows the latest order when available and a **Start shopping** button. The welcome heading uses login history: signup marks a new account as not yet logged in, and the first successful login atomically marks it as logged in. Later logins show **Welcome back to Dragon shop** even without prior orders. The signed session retains its greeting across page reloads. Existing accounts and legacy sessions are treated as returning customers.
 
 Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. Customer-only `POST /checkout` places demo orders as described below.
+
+## CSRF protection
+
+All API writes, including login, signup, product uploads, and checkout, require a signed double-submit CSRF token. First call public `GET /csrf-token` with the session cookie, if present. It returns `{ "success": true }` and sets a readable `XSRF-TOKEN` cookie with `Cache-Control: no-store`. Send that cookie along with an `X-XSRF-TOKEN` header containing the same value on each POST request. A cookie alone is insufficient. Tokens use the shared session-signing key and are bound to the current `SESSIONID`; each replica must use the same signing key.
+
+Angular obtains the token before startup and its built-in HttpClient XSRF protection attaches the header to relative same-origin writes, including multipart uploads. Login replaces it with a session-bound token; POST logout expires the session and issues a fresh anonymous token so another login can work without reloading. Page reloads bootstrap a token for existing sessions. The session cookie remains HTTP-only; only the CSRF cookie is readable by JavaScript. Both cookies use `SameSite=Lax` and `Secure` in production.
+
+The API rejects `Sec-Fetch-Site: cross-site` writes and validates Origin (or Referer as a fallback). By default, the source host and port must match the request Host. If a reverse proxy rewrites Host, set `CSRF_TRUSTED_ORIGINS` to a comma-separated list of exact browser origins, such as `https://shop.example.com`; wildcards are not supported. Forwarded headers are not trusted. Clients without Origin/Referer must still supply valid cookie/header tokens. Rejected CSRF requests return HTTP 403 without performing the requested write. `GET /logout` has been replaced by CSRF-protected `POST /logout`.
 
 ## Authentication rate limits
 

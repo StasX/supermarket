@@ -1,4 +1,5 @@
 {
+  "/csrf-token": { "target": "http://localhost:3000" },
   "/orders/**": { "target": "http://localhost:3000" },
   "/checkout": { "target": "http://localhost:3000" },
   "/upload-product-image": { "target": "http://localhost:3000" },

@@ -193,7 +193,11 @@ test('live demo administrator can sign in, search products, reconnect and sign o
   await page.goto('/#/login');
   await page.getByLabel('Email', { exact: true }).fill('j.smith@example.com');
   await page.getByLabel('Password', { exact: true }).fill('sec907@Ad0');
+  const loginRequest = page.waitForRequest(
+    (request) => request.url().endsWith('/login') && request.method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  expect((await loginRequest).headers()['x-xsrf-token']).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/);
   await expect(page.getByRole('heading', { name: 'Product manager' })).toBeVisible();
   await expect(page.locator('.product').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('management.png'), fullPage: true });
@@ -202,7 +206,11 @@ test('live demo administrator can sign in, search products, reconnect and sign o
   await expect(page.locator('.product').first()).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Product manager' })).toBeVisible();
+  const logoutRequest = page.waitForRequest((request) => request.url().endsWith('/logout'));
   await page.getByRole('button', { name: 'Sign out' }).click();
+  const logout = await logoutRequest;
+  expect(logout.method()).toBe('POST');
+  expect(logout.headers()['x-xsrf-token']).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   expect(errors).toEqual([]);
 });

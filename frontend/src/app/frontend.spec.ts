@@ -92,6 +92,19 @@ describe('form validation', () => {
 });
 
 describe('API compatibility', () => {
+  it('sends the CSRF cookie as a header on same-origin writes', async () => {
+    document.cookie = 'XSRF-TOKEN=test-signed-token; path=/';
+    try {
+      const pending = TestBed.inject(ApiService).logout();
+      const request = TestBed.inject(HttpTestingController).expectOne('/logout');
+      expect(request.request.method).toBe('POST');
+      expect(request.request.headers.get('X-XSRF-TOKEN')).toBe('test-signed-token');
+      request.flush({ success: true });
+      await pending;
+    } finally {
+      document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/';
+    }
+  });
   it('uploads an image as multipart form data', async () => {
     const file = new File(['image'], 'cheese.png', { type: 'image/png' });
     const promise = TestBed.inject(ApiService).uploadProductImage(file);

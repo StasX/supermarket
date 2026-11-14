@@ -89,7 +89,7 @@ export class ApiService {
   }
 
   logout() {
-    return firstValueFrom(this.http.get<Result>('/logout'));
+    return firstValueFrom(this.http.post<Result>('/logout', {}));
   }
 
   async products(category = '', search = '') {
