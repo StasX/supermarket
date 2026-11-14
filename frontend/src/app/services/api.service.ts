@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 
 import {
@@ -23,8 +23,24 @@ export class ApiService {
     return firstValueFrom(this.http.post<Result & Partial<User>>('/login', { username, password }));
   }
 
-  signup(body: Signup) {
-    return firstValueFrom(this.http.post<{ created: boolean; reason?: string }>('/sign-up', body));
+  async signup(body: Signup) {
+    const send = () =>
+      firstValueFrom(this.http.post<{ created: boolean; reason?: string }>('/sign-up', body));
+    try {
+      return await send();
+    } catch (error) {
+      if (
+        !(error instanceof HttpErrorResponse) ||
+        error.status !== 403 ||
+        error.error?.reason !== 'Invalid CSRF token or request origin.'
+      ) {
+        throw error;
+      }
+      // A stale token can remain in an open tab after the session or signing key changes.
+      // The guard rejects the original request before signup performs any writes.
+      await firstValueFrom(this.http.get('/csrf-token'));
+      return send();
+    }
   }
 
   reconnect() {

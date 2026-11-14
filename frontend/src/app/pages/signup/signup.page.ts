@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../services/api.service';
@@ -82,8 +83,24 @@ export class SignupPage {
       } else {
         this.error.set(result.reason ?? 'Unable to create your account.');
       }
-    } catch {
-      this.error.set('Unable to create your account. Please try again.');
+    } catch (error) {
+      let reason = 'Unable to create your account. Please try again.';
+      if (error instanceof HttpErrorResponse) {
+        if (error.status === 0) {
+          reason = 'Unable to reach the server. Check your connection and try again.';
+        } else if (error.status === 403) {
+          reason = 'Your session could not be verified. Refresh the page and try again.';
+        } else if (error.status === 429) {
+          const seconds = Number(error.headers.get('Retry-After'));
+          reason =
+            Number.isFinite(seconds) && seconds > 0
+              ? `Too many signup attempts. Try again in ${Math.ceil(seconds / 60)} minute(s).`
+              : 'Too many signup attempts. Please try again later.';
+        } else if (error.status === 503) {
+          reason = 'Signup is temporarily unavailable. Please try again shortly.';
+        }
+      }
+      this.error.set(reason);
     } finally {
       this.busy.set(false);
     }

@@ -95,6 +95,55 @@ describe('form validation', () => {
 });
 
 describe('API compatibility', () => {
+  it.each([true, false])(
+    'refreshes a rejected signup token and retries only once (success=%s)',
+    async (success) => {
+      const http = TestBed.inject(HttpTestingController);
+      const body = {
+        id: '123456789',
+        email: 'buyer@example.com',
+        pass: 'password123',
+        firstName: 'John',
+        lastName: 'Smith',
+        city: 'Haifa',
+        street: 'Main 1',
+      };
+      document.cookie = 'XSRF-TOKEN=stale; path=/';
+      try {
+        const pending = TestBed.inject(ApiService).signup(body);
+        const outcome = pending.then(
+          (value) => value,
+          (error) => error,
+        );
+        http
+          .expectOne('/sign-up')
+          .flush(
+            { reason: 'Invalid CSRF token or request origin.' },
+            { status: 403, statusText: 'Forbidden' },
+          );
+        await Promise.resolve();
+        document.cookie = 'XSRF-TOKEN=fresh; path=/';
+        http.expectOne('/csrf-token').flush({ success: true });
+        await Promise.resolve();
+        const retry = http.expectOne('/sign-up');
+        expect(retry.request.body).toEqual(body);
+        expect(retry.request.headers.get('X-XSRF-TOKEN')).toBe('fresh');
+        if (success) {
+          retry.flush({ created: true });
+          expect(await outcome).toEqual({ created: true });
+        } else {
+          retry.flush(
+            { reason: 'Invalid CSRF token or request origin.' },
+            { status: 403, statusText: 'Forbidden' },
+          );
+          expect(await outcome).toMatchObject({ status: 403 });
+        }
+        http.expectNone('/csrf-token');
+      } finally {
+        document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/';
+      }
+    },
+  );
   it('sends the CSRF cookie as a header on same-origin writes', async () => {
     document.cookie = 'XSRF-TOKEN=test-signed-token; path=/';
     try {
@@ -333,6 +382,36 @@ describe('cart persistence', () => {
 });
 
 describe('Angular rendering and forms', () => {
+  it.each([
+    [429, 'Too many signup attempts. Try again in 2 minute(s).'],
+    [503, 'Signup is temporarily unavailable. Please try again shortly.'],
+    [500, 'Unable to create your account. Please try again.'],
+  ])('shows an actionable signup error for HTTP %s', async (status, reason) => {
+    const fixture = TestBed.createComponent(SignupPage);
+    const page = fixture.componentInstance;
+    page.account.setValue({
+      id: '123456789',
+      email: 'buyer@example.com',
+      pass: 'password123',
+      confirm: 'password123',
+    });
+    page.details.setValue({
+      firstName: 'John',
+      lastName: 'Smith',
+      city: 'Haifa',
+      street: 'Main 1',
+    });
+    const pending = page.submit();
+    TestBed.inject(HttpTestingController)
+      .expectOne('/sign-up')
+      .flush(
+        { reason: 'Request rejected' },
+        { status: Number(status), statusText: 'Error', headers: { 'Retry-After': '90' } },
+      );
+    await pending;
+    expect(page.error()).toBe(reason);
+    expect(page.busy()).toBe(false);
+  });
   it('allows administrators to edit products with server-hosted image URLs', () => {
     const fixture = TestBed.createComponent(ProductEditorComponent);
     fixture.componentInstance.edit({ ...product, image: '/products/apple-juice.png' });
