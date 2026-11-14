@@ -1,9 +1,9 @@
-import { LoginInput, SignupInput, CookieResponse, record } from './contracts';
+import { LoginInput, SignupInput, CookieResponse, record } from '../types/contracts';
 import { HttpException, Inject, Injectable } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compare, hash } from 'bcryptjs';
-import { MODELS, DatabaseModels } from './database.module';
+import { MODELS, DatabaseModels } from '../modules/database.module';
 import { CsrfService } from './csrf.service';
 // Keep the untyped CommonJS dependency behind the operations used here.
 const jwt = require('jsonwebtoken') as {
@@ -23,7 +23,9 @@ export class AuthService {
   ) {}
 
   private key() {
-    return readFileSync(process.env['JWT_KEY_PATH'] || join(__dirname, '..', 'src', 'key.pem'));
+    return readFileSync(
+      process.env['JWT_KEY_PATH'] || join(__dirname, '..', '..', 'src', 'key.pem'),
+    );
   }
 
   async authenticate(token?: unknown) {

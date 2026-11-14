@@ -1,7 +1,7 @@
-import { CheckoutInput, UserRecord, record } from './contracts';
+import { CheckoutInput, UserRecord, record } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
-import { MODELS, DatabaseModels } from './database.module';
+import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ProductsService } from './products.service';
 import { InvoiceService } from './invoice.service';
 

@@ -1,4 +1,4 @@
-import { SessionRequest } from './contracts';
+import { SessionRequest } from '../types/contracts';
 import {
   CanActivate,
   ExecutionContext,
@@ -7,7 +7,7 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AuthService } from './auth.service';
+import { AuthService } from '../services/auth.service';
 
 export const Public = () => SetMetadata('public', true);
 export const Role = (role: number) => SetMetadata('role', role);

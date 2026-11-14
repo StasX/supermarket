@@ -1,4 +1,4 @@
-import './load-env';
+import './config/load-env';
 import { writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { createApp } from './main';

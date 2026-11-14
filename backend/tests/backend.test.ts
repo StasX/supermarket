@@ -16,9 +16,9 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { NotFoundException } from '@nestjs/common';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-const { AppModule } = require('../dist/app.module');
-const { AuthRateLimitGuard } = require('../dist/auth-rate-limit.guard');
-const { AuthRateLimitStore } = require('../dist/auth-rate-limit.store');
+const { AppModule } = require('../dist/modules/app.module');
+const { AuthRateLimitGuard } = require('../dist/guards/auth-rate-limit.guard');
+const { AuthRateLimitStore } = require('../dist/stores/auth-rate-limit.store');
 const rateBuckets = new Map<string, { count: number; expires: number }>();
 const rateStore = {
   async consume(key: string, limit: number, windowMs: number) {
@@ -33,10 +33,10 @@ const rateStore = {
   },
 };
 let authRateLimiter = new AuthRateLimitGuard(rateStore);
-const { MODELS } = require('../dist/database.module');
-const { ImageStorageService } = require('../dist/image-storage.service');
-const { createInvoice } = require('../dist/invoice');
-const { CsrfService } = require('../dist/csrf.service');
+const { MODELS } = require('../dist/modules/database.module');
+const { ImageStorageService } = require('../dist/services/image-storage.service');
+const { createInvoice } = require('../dist/utils/invoice');
+const { CsrfService } = require('../dist/services/csrf.service');
 const images = new Map<string, Buffer>();
 const invoiceWrite = jest.fn<(...args: any[]) => Promise<void>>();
 

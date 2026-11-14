@@ -1,6 +1,6 @@
-import { SessionRequest, CookieResponse } from './contracts';
+import { SessionRequest, CookieResponse } from '../types/contracts';
 import { CanActivate, ExecutionContext, HttpException, Injectable } from '@nestjs/common';
-import { AuthRateLimitStore } from './auth-rate-limit.store';
+import { AuthRateLimitStore } from '../stores/auth-rate-limit.store';
 
 const WINDOW_MS = 15 * 60 * 1000;
 

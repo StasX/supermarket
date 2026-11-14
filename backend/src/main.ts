@@ -1,7 +1,7 @@
 import 'reflect-metadata';
-import './load-env';
+import './config/load-env';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { AppModule } from './modules/app.module';
 const cookieParser = require('cookie-parser');
 
 export async function createApp(rootModule = AppModule) {

@@ -13,12 +13,12 @@ import { once } from 'node:events';
 import mongoose from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
-const { createStorageClient } = require('../dist/image-storage.service');
+const { createStorageClient } = require('../dist/services/image-storage.service');
 const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
-const { AuthRateLimitStore } = require('../dist/auth-rate-limit.store');
+const { AuthRateLimitStore } = require('../dist/stores/auth-rate-limit.store');
 
 test('Redis rate limits are atomic across replicas and expire without extending the window', async () => {
   const first = new AuthRateLimitStore();

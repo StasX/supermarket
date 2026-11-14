@@ -1,7 +1,7 @@
-import { CategoryInput, SearchInput, ProductInput, record } from './contracts';
+import { CategoryInput, SearchInput, ProductInput, record } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
-import { MODELS, DatabaseModels } from './database.module';
+import { MODELS, DatabaseModels } from '../modules/database.module';
 
 const categories = ['Milk & Eggs', 'Vegetables & Fruits', 'Meet & Fish', 'Wine & Drinks'];
 const isValidProductOrCartId = (id: unknown): id is string =>

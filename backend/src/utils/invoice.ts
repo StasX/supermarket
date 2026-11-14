@@ -19,7 +19,7 @@ export interface InvoiceOrder {
 /** Keep the invoice's table and palette aligned with the order review page. */
 export function createInvoice(order: InvoiceOrder): Buffer {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
-  const logo = readFileSync(join(__dirname, '..', 'static', 'invoice-logo.png'));
+  const logo = readFileSync(join(__dirname, '..', '..', 'static', 'invoice-logo.png'));
   const logoHeight = 32;
   const logoWidth = (logoHeight * logo.readUInt32BE(16)) / logo.readUInt32BE(20);
   pdf.setProperties({ title: `Dragon shop invoice ${order._id}`, author: 'Dragon shop' });

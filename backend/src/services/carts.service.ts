@@ -1,7 +1,7 @@
-import { CartInput, UserRecord } from './contracts';
+import { CartInput, UserRecord } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
-import { MODELS, DatabaseModels } from './database.module';
+import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ProductsService } from './products.service';
 
 const isValidProductOrCartId = (id: unknown): id is string =>

@@ -1,9 +1,9 @@
 import { Injectable, Module, OnApplicationShutdown } from '@nestjs/common';
 import mongoose from 'mongoose';
-import User = require('./models/User');
-import Product = require('./models/Product');
-import Cart = require('./models/Cart');
-import Order = require('./models/Order');
+import User = require('../models/User');
+import Product = require('../models/Product');
+import Cart = require('../models/Cart');
+import Order = require('../models/Order');
 
 export const MODELS = 'MODELS';
 

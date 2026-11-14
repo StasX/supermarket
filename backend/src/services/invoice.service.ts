@@ -1,8 +1,8 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import mongoose from 'mongoose';
-import { MODELS, DatabaseModels } from './database.module';
+import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ImageStorageService } from './image-storage.service';
-import { createInvoice, InvoiceOrder } from './invoice';
+import { createInvoice, InvoiceOrder } from '../utils/invoice';
 
 @Injectable()
 export class InvoiceService {

@@ -8,7 +8,7 @@ import {
   CheckoutInput,
   SessionRequest,
   CookieResponse,
-} from './contracts';
+} from '../types/contracts';
 import {
   BadRequestException,
   Body,
@@ -26,15 +26,16 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
-import { ImageStorageService } from './image-storage.service';
-import { AuthService } from './auth.service';
-import { ProductsService } from './products.service';
-import { CartsService } from './carts.service';
-import { CheckoutService } from './checkout.service';
-import { InvoiceService } from './invoice.service';
-import { Public, Role, SessionGuard } from './session.guard';
-import { AuthRateLimitGuard } from './auth-rate-limit.guard';
-import { CsrfGuard, CsrfService } from './csrf.service';
+import { ImageStorageService } from '../services/image-storage.service';
+import { AuthService } from '../services/auth.service';
+import { ProductsService } from '../services/products.service';
+import { CartsService } from '../services/carts.service';
+import { CheckoutService } from '../services/checkout.service';
+import { InvoiceService } from '../services/invoice.service';
+import { Public, Role, SessionGuard } from '../guards/session.guard';
+import { AuthRateLimitGuard } from '../guards/auth-rate-limit.guard';
+import { CsrfService } from '../services/csrf.service';
+import { CsrfGuard } from '../guards/csrf.guard';
 
 @Controller()
 @UseGuards(SessionGuard, CsrfGuard)

@@ -24,7 +24,16 @@ The seeded demo administrator credentials are:
 
 ```text
 backend/
-  src/         NestJS controllers, services, guard, module, and MongoDB models
+  src/
+    controllers/ HTTP endpoints
+    services/    Authentication, products, carts, checkout, images, invoices, and CSRF tokens
+    models/      MongoDB schemas
+    modules/     Application wiring and database connection
+    guards/      Session, role, CSRF, and authentication rate-limit checks
+    stores/      Redis rate-limit storage
+    types/       Request and data contracts
+    utils/       Invoice PDF generation
+    config/      Environment loading
   tests/       Jest HTTP tests with mocked models and real MongoDB/MinIO integration tests
 frontend/
   src/         Angular 22 standalone components, services, forms, routes, and unit tests
