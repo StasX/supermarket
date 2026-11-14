@@ -280,7 +280,11 @@ test.each([
     payment: { method: 'credit_card', last4: '9999' },
   };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await api().post('/checkout').set('Cookie', cookie()).send(retryBody).expect(200);
+    const response = await api()
+      .post('/checkout')
+      .set('Cookie', cookie())
+      .send(retryBody)
+      .expect(200);
     expect(response.body).toMatchObject({
       success: true,
       order: {
