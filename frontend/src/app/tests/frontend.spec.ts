@@ -440,7 +440,11 @@ describe('Angular rendering and forms', () => {
       pass: 'password123',
       confirm: 'password123',
     });
-    page.next();
+    const checking = page.next();
+    TestBed.inject(HttpTestingController)
+      .expectOne('/check-signup')
+      .flush({ success: true, available: true });
+    await checking;
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Step 2 of 2');
     page.details.setValue({
@@ -740,5 +744,70 @@ describe('demo checkout', () => {
     expect(page.cart.id()).toBe('c1');
     expect(page.error()).toBe('Cart changed');
     expect(page.completed()).toBeNull();
+  });
+});
+
+describe('signup account availability', () => {
+  function setup() {
+    const fixture = TestBed.createComponent(SignupPage);
+    fixture.componentInstance.account.setValue({
+      id: '123456789',
+      email: 'buyer@example.com',
+      pass: 'password123',
+      confirm: 'password123',
+    });
+    return fixture;
+  }
+  it.each([
+    [true, false, 'This email is already registered.'],
+    [false, true, 'This ID number is already registered.'],
+    [true, true, 'This email and ID number are already registered.'],
+  ])(
+    'stays on the account step for existing credentials (%s, %s)',
+    async (emailExists, idExists, reason) => {
+      const fixture = setup();
+      const page = fixture.componentInstance;
+      fixture.detectChanges();
+      const pending = page.next();
+      await page.next();
+      expect(page.busy()).toBe(true);
+      const request = TestBed.inject(HttpTestingController).expectOne('/check-signup');
+      expect(request.request.body).toEqual({ email: 'buyer@example.com', id: '123456789' });
+      request.flush({ success: true, available: false, emailExists, idExists, reason });
+      await pending;
+      fixture.detectChanges();
+      expect(page.step()).toBe(1);
+      expect(fixture.nativeElement.querySelector('[role=alert]').textContent).toContain(reason);
+      expect(page.busy()).toBe(false);
+      TestBed.inject(HttpTestingController).expectNone('/sign-up');
+    },
+  );
+  it('stays on the first step when checking fails and allows retrying', async () => {
+    const page = setup().componentInstance;
+    const pending = page.next();
+    TestBed.inject(HttpTestingController)
+      .expectOne('/check-signup')
+      .flush({}, { status: 503, statusText: 'Unavailable' });
+    await pending;
+    expect(page.step()).toBe(1);
+    expect(page.busy()).toBe(false);
+    expect(page.error()).toContain('temporarily unavailable');
+    const retry = page.next();
+    TestBed.inject(HttpTestingController)
+      .expectOne('/check-signup')
+      .flush({ success: true, available: true });
+    await retry;
+    expect(page.step()).toBe(2);
+  });
+  it('does not advance with a response for changed credentials', async () => {
+    const page = setup().componentInstance;
+    const pending = page.next();
+    page.account.controls.email.setValue('changed@example.com');
+    TestBed.inject(HttpTestingController)
+      .expectOne('/check-signup')
+      .flush({ success: true, available: true });
+    await pending;
+    expect(page.step()).toBe(1);
+    expect(page.error()).toContain('details changed');
   });
 });

@@ -13,6 +13,7 @@ import {
   CheckoutOrder,
   ProductResult,
   Signup,
+  SignupAvailability,
 } from '../models/api.models';
 
 @Injectable({ providedIn: 'root' })
@@ -23,9 +24,16 @@ export class ApiService {
     return firstValueFrom(this.http.post<Result & Partial<User>>('/login', { username, password }));
   }
 
-  async signup(body: Signup) {
-    const send = () =>
-      firstValueFrom(this.http.post<{ created: boolean; reason?: string }>('/sign-up', body));
+  checkSignup(body: Pick<Signup, 'email' | 'id'>) {
+    return this.signupRequest<SignupAvailability>('/check-signup', body);
+  }
+
+  signup(body: Signup) {
+    return this.signupRequest<{ created: boolean; reason?: string }>('/sign-up', body);
+  }
+
+  private async signupRequest<T>(url: string, body: unknown): Promise<T> {
+    const send = () => firstValueFrom(this.http.post<T>(url, body));
     try {
       return await send();
     } catch (error) {

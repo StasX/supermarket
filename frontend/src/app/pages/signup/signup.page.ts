@@ -50,14 +50,33 @@ export class SignupPage {
     street: ['', [Validators.required, Validators.pattern(streetPattern)]],
   });
 
-  next() {
+  async next() {
+    if (this.busy()) return;
     if (this.account.invalid) {
       this.account.markAllAsTouched();
       this.error.set('Check your ID, email, password, and password confirmation.');
       return;
     }
     this.error.set('');
-    this.step.set(2);
+    this.busy.set(true);
+    const { email, id } = this.account.getRawValue();
+    try {
+      const result = await this.api.checkSignup({ email, id });
+      const current = this.account.getRawValue();
+      if (current.email !== email || current.id !== id || this.account.invalid) {
+        this.error.set('Your account details changed. Please press Continue again.');
+        return;
+      }
+      if (!result.success || !result.available) {
+        this.error.set(result.reason || 'Unable to verify your email and ID. Please try again.');
+        return;
+      }
+      this.step.set(2);
+    } catch (error) {
+      this.showRequestError(error);
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   back() {
@@ -84,25 +103,29 @@ export class SignupPage {
         this.error.set(result.reason ?? 'Unable to create your account.');
       }
     } catch (error) {
-      let reason = 'Unable to create your account. Please try again.';
-      if (error instanceof HttpErrorResponse) {
-        if (error.status === 0) {
-          reason = 'Unable to reach the server. Check your connection and try again.';
-        } else if (error.status === 403) {
-          reason = 'Your session could not be verified. Refresh the page and try again.';
-        } else if (error.status === 429) {
-          const seconds = Number(error.headers.get('Retry-After'));
-          reason =
-            Number.isFinite(seconds) && seconds > 0
-              ? `Too many signup attempts. Try again in ${Math.ceil(seconds / 60)} minute(s).`
-              : 'Too many signup attempts. Please try again later.';
-        } else if (error.status === 503) {
-          reason = 'Signup is temporarily unavailable. Please try again shortly.';
-        }
-      }
-      this.error.set(reason);
+      this.showRequestError(error);
     } finally {
       this.busy.set(false);
     }
+  }
+
+  private showRequestError(error: unknown) {
+    let reason = 'Unable to create your account. Please try again.';
+    if (error instanceof HttpErrorResponse) {
+      if (error.status === 0) {
+        reason = 'Unable to reach the server. Check your connection and try again.';
+      } else if (error.status === 403) {
+        reason = 'Your session could not be verified. Refresh the page and try again.';
+      } else if (error.status === 429) {
+        const seconds = Number(error.headers.get('Retry-After'));
+        reason =
+          Number.isFinite(seconds) && seconds > 0
+            ? `Too many signup attempts. Try again in ${Math.ceil(seconds / 60)} minute(s).`
+            : 'Too many signup attempts. Please try again later.';
+      } else if (error.status === 503) {
+        reason = 'Signup is temporarily unavailable. Please try again shortly.';
+      }
+    }
+    this.error.set(reason);
   }
 }

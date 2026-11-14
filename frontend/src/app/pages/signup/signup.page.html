@@ -20,23 +20,39 @@
     @if (step() === 1) {
     <form [formGroup]="account" (ngSubmit)="next()">
       <label
-        >ID number<input formControlName="id" inputmode="numeric" maxlength="9" required
+        >ID number<input
+          formControlName="id"
+          inputmode="numeric"
+          maxlength="9"
+          [readonly]="busy()"
+          required
       /></label>
       <label
-        >Email<input type="email" formControlName="email" autocomplete="email" required
+        >Email<input
+          type="email"
+          formControlName="email"
+          autocomplete="email"
+          [readonly]="busy()"
+          required
       /></label>
       <label
-        >Password<input type="password" formControlName="pass" autocomplete="new-password" required
+        >Password<input
+          type="password"
+          formControlName="pass"
+          autocomplete="new-password"
+          [readonly]="busy()"
+          required
       /></label>
       <label
         >Confirm password<input
           type="password"
           formControlName="confirm"
           autocomplete="new-password"
+          [readonly]="busy()"
           required
       /></label>
       <p class="hint">Use a 9-digit ID and a password of at least 8 characters.</p>
-      <button type="submit">Continue</button>
+      <button type="submit" [disabled]="busy()">{{ busy() ? 'Checking...' : 'Continue' }}</button>
     </form>
     } @else {
     <form [formGroup]="details" (ngSubmit)="submit()">

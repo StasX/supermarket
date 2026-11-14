@@ -156,6 +156,9 @@ test('two-step signup validates confirmation and submits the existing API payloa
   page,
 }) => {
   await page.route('**/sign-up', (route) => route.fulfill({ json: { created: true } }));
+  await page.route('**/check-signup', (route) =>
+    route.fulfill({ json: { success: true, available: true } }),
+  );
   await page.goto('/#/sign-up');
   await page.getByLabel('ID number').fill('123456789');
   await page.getByLabel('Email', { exact: true }).fill('test@example.com');
@@ -322,4 +325,35 @@ test('administrator confirms product deletion and can cancel without changing th
   await page.reload();
   await expect(page.locator('.products .product')).toHaveCount(0);
   expect(deletes).toBe(2);
+});
+
+test('signup Continue blocks registered emails and IDs before asking for personal details', async ({
+  page,
+}) => {
+  let reason = 'This email is already registered.';
+  await page.route('**/check-signup', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      email: 'existing@example.com',
+      id: '123456789',
+    });
+    await route.fulfill({ json: { success: true, available: !reason, reason } });
+  });
+  await page.goto('/#/sign-up');
+  await page.getByLabel('ID number').fill('123456789');
+  await page.getByLabel('Email', { exact: true }).fill('existing@example.com');
+  await page.getByLabel('Password', { exact: true }).fill('password123');
+  await page.getByLabel('Confirm password').fill('password123');
+  for (const message of [
+    'This email is already registered.',
+    'This ID number is already registered.',
+  ]) {
+    reason = message;
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText(message);
+    await expect(page.getByText('Step 1 of 2')).toBeVisible();
+    await expect(page.getByLabel('First name')).toHaveCount(0);
+  }
+  reason = '';
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('First name')).toBeVisible();
 });

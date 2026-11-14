@@ -271,7 +271,7 @@ npm audit uses `--audit-level=moderate`: moderate, high, and critical findings f
 
 ## API reference
 
-API paths are relative to the backend origin (`http://localhost:3000` by default). `/csrf-token`, `/login`, `/sign-up`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
+API paths are relative to the backend origin (`http://localhost:3000` by default). `/csrf-token`, `/login`, `/check-signup`, `/sign-up`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
 
 ### Products
 
@@ -365,12 +365,13 @@ The response has the same `success` and `products` structure shown for `/find-pr
 
 ### Users and sessions
 
-| Method | Path        | Description                |
-| ------ | ----------- | -------------------------- |
-| POST   | `/login`    | Log in.                    |
-| POST   | `/logout`   | Log out (CSRF protected).  |
-| GET    | `/reconect` | Reconnect a user session.  |
-| POST   | `/sign-up`  | Create a customer account. |
+| Method | Path            | Description                      |
+| ------ | --------------- | -------------------------------- |
+| POST   | `/login`        | Log in.                          |
+| POST   | `/logout`       | Log out (CSRF protected).        |
+| GET    | `/reconect`     | Reconnect a user session.        |
+| POST   | `/sign-up`      | Create a customer account.       |
+| POST   | `/check-signup` | Check email and ID availability. |
 
 #### Log in
 
@@ -417,6 +418,12 @@ Response:
 `GET /reconect`
 
 No request parameters are needed. The response includes `success`, `role`, and `user` as in `/login`, but `name` is an object containing `first_name` and `last_name`.
+
+#### Check signup availability
+
+`POST /check-signup` accepts `{ "email": "buyer@example.com", "id": "123456789" }` with a valid CSRF token. It returns `success`, `available`, `emailExists`, `idExists`, and a `reason` when either value is already registered. It does not create an account or receive passwords.
+
+The signup **Continue** button checks this endpoint before showing personal details. Duplicate email or ID values keep the user on step one with a specific message. While checking, the button and account fields are locked; failed checks can be retried. Final signup checks both fields again, and MongoDB unique indexes reject concurrent duplicates.
 
 #### Sign up
 
@@ -502,7 +509,7 @@ The API rejects `Sec-Fetch-Site: cross-site` writes and validates Origin (or Ref
 
 ## Authentication rate limits
 
-Login allows 20 requests and signup allows 5 requests per connection peer IP address per 15-minute window, with independent limits for each endpoint. All attempts count, including successful and invalid requests. Excess requests return HTTP 429 with `{ "success": false, "reason": "Too many attempts. Please try again later." }` and a `Retry-After` header in seconds. Limits are stored in Redis using an atomic Lua script so application replicas share counters and application restarts preserve active windows. Set `REDIS_URL` to the same Redis instance on every replica (default `redis://127.0.0.1:6379` for direct startup; Compose uses `redis://redis:6379`). Redis expires counters automatically after 15 minutes; rejected attempts do not extend the window. If Redis is unavailable, authentication fails closed with HTTP 503 and `Retry-After: 5`. Both Compose files build `redis/Dockerfile`, which loads `redis/redis.conf`, includes a health check, and runs as the Redis user. The configuration enables append-only persistence and a 128 MB no-eviction memory limit. Compose includes a private Redis service with append-only persistence in the `redis_data` volume and a no-eviction memory limit. Forwarding headers are ignored to prevent spoofing, so clients behind a reverse proxy share its peer-address limit. For direct local startup, run Redis and override `REDIS_URL` if the root `.env` points to the Compose hostname.
+Login allows 20 requests, signup allows 5 requests, and signup availability checks allow 5 requests per connection peer IP address per 15-minute window, with independent limits for each endpoint. All attempts count, including successful and invalid requests. Excess requests return HTTP 429 with `{ "success": false, "reason": "Too many attempts. Please try again later." }` and a `Retry-After` header in seconds. Limits are stored in Redis using an atomic Lua script so application replicas share counters and application restarts preserve active windows. Set `REDIS_URL` to the same Redis instance on every replica (default `redis://127.0.0.1:6379` for direct startup; Compose uses `redis://redis:6379`). Redis expires counters automatically after 15 minutes; rejected attempts do not extend the window. If Redis is unavailable, authentication fails closed with HTTP 503 and `Retry-After: 5`. Both Compose files build `redis/Dockerfile`, which loads `redis/redis.conf`, includes a health check, and runs as the Redis user. The configuration enables append-only persistence and a 128 MB no-eviction memory limit. Compose includes a private Redis service with append-only persistence in the `redis_data` volume and a no-eviction memory limit. Forwarding headers are ignored to prevent spoofing, so clients behind a reverse proxy share its peer-address limit. For direct local startup, run Redis and override `REDIS_URL` if the root `.env` points to the Compose hostname.
 
 ## Demo checkout
 

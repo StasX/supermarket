@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { compare, hash } from 'bcryptjs';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { CsrfService } from './csrf.service';
+import mongoose from 'mongoose';
 // Keep the untyped CommonJS dependency behind the operations used here.
 const jwt = require('jsonwebtoken') as {
   verify(token: string, key: Buffer, options: { algorithms: string[] }): unknown;
@@ -103,6 +104,36 @@ export class AuthService {
     };
   }
 
+  async checkSignup(body: Pick<SignupInput, 'email' | 'id'>) {
+    if (!email(body.email) || typeof body.id !== 'string' || !/^\d{9}$/.test(body.id)) {
+      return {
+        success: false,
+        available: false,
+        reason: 'Enter a valid email and 9-digit ID number.',
+      };
+    }
+    const [existingEmail, existingId] = await Promise.all([
+      this.models.users.findOne({ username: body.email }),
+      this.models.users.findOne({ id: Number(body.id) }),
+    ]);
+    const emailExists = Boolean(existingEmail);
+    const idExists = Boolean(existingId);
+    return {
+      success: true,
+      available: !emailExists && !idExists,
+      emailExists,
+      idExists,
+      reason:
+        emailExists && idExists
+          ? 'This email and ID number are already registered.'
+          : emailExists
+            ? 'This email is already registered.'
+            : idExists
+              ? 'This ID number is already registered.'
+              : undefined,
+    };
+  }
+
   async signup(body: SignupInput) {
     const name =
       /^(?=.{1,150}$)\p{L}[\p{L}\p{M}]*(?:[ '\u2019\u02bc\-\u2010\u2011][\p{L}\p{M}]+)*$/u;
@@ -124,9 +155,8 @@ export class AuthService {
     ) {
       return { created: false, reason: 'one of passed values invalid' };
     }
-    if (await this.models.users.findOne({ username: body.email })) {
-      return { created: false, reason: 'user alredy exists' };
-    }
+    const availability = await this.checkSignup({ email: body.email, id: String(body.id) });
+    if (!availability.available) return { created: false, reason: availability.reason };
     try {
       await this.models.users.create({
         id: Number(body.id),
@@ -138,7 +168,13 @@ export class AuthService {
         has_logged_in: false,
       });
       return { created: true };
-    } catch {
+    } catch (error) {
+      if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
+        return {
+          created: false,
+          reason: 'An account with this email or ID number already exists.',
+        };
+      }
       return { created: false, reason: 'unexpected error' };
     }
   }

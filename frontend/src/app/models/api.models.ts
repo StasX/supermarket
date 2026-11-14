@@ -31,6 +31,12 @@ export interface OrderHistory {
 export interface Result {
   success: boolean;
 }
+export interface SignupAvailability extends Result {
+  available: boolean;
+  emailExists?: boolean;
+  idExists?: boolean;
+  reason?: string;
+}
 export interface CheckoutRequest {
   cartId: string;
   shipping: { city: string; street: string; date: string };

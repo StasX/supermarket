@@ -169,7 +169,7 @@ describe('CSRF protection', () => {
     expect(new CsrfService().valid(token)).toBe(true);
   });
 
-  test.each(['/login', '/sign-up'])(
+  test.each(['/login', '/sign-up', '/check-signup'])(
     'public form %s rejects missing CSRF credentials',
     async (route) => {
       await raw().post(route).send({}).expect(403);
@@ -983,6 +983,7 @@ for (const [method, route, allowedRole] of [
 test.each([
   ['login', 20],
   ['sign-up', 5],
+  ['check-signup', 5],
 ] as const)(
   '%s limits requests before accessing the database and allows requests after expiry',
   async (route, limit) => {
@@ -1456,4 +1457,87 @@ test('product deletion rejects anonymous and unverified requests', async () => {
     .send({ id: customer._id })
     .expect(403);
   expect(models.products.findByIdAndDelete).not.toHaveBeenCalled();
+});
+
+test.each([
+  [false, false, undefined],
+  [true, false, 'This email is already registered.'],
+  [false, true, 'This ID number is already registered.'],
+  [true, true, 'This email and ID number are already registered.'],
+])(
+  'signup availability checks email and ID independently (%s, %s)',
+  async (emailExists, idExists, reason) => {
+    models.users.findOne.mockImplementation(async (query) =>
+      query.username ? (emailExists ? customer : null) : idExists ? customer : null,
+    );
+    const response = await api()
+      .post('/check-signup')
+      .send({ email: customer.username, id: '123456789' })
+      .expect(200);
+    expect(response.body).toEqual({
+      success: true,
+      available: !emailExists && !idExists,
+      emailExists,
+      idExists,
+      ...(reason ? { reason } : {}),
+    });
+    expect(models.users.findOne).toHaveBeenCalledWith({ username: customer.username });
+    expect(models.users.findOne).toHaveBeenCalledWith({ id: 123456789 });
+    expect(models.users.create).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  { email: { $ne: null }, id: '123456789' },
+  { email: 'buyer@example.com', id: { $ne: null } },
+  { email: 'invalid', id: '1' },
+])('signup availability rejects malformed input %j', async (body) => {
+  const response = await api().post('/check-signup').send(body).expect(200);
+  expect(response.body.available).toBe(false);
+  expect(response.body.success).toBe(false);
+  expect(models.users.findOne).not.toHaveBeenCalled();
+});
+
+test('final signup rejects an existing ID even with a different email', async () => {
+  models.users.findOne.mockImplementation(async (query) => (query.id ? customer : null));
+  const response = await api()
+    .post('/sign-up')
+    .send({
+      id: '123456789',
+      email: 'new@example.com',
+      pass: 'password123',
+      firstName: 'John',
+      lastName: 'Smith',
+      city: 'Haifa',
+      street: 'Main 1',
+    })
+    .expect(200);
+  expect(response.body).toEqual({
+    created: false,
+    reason: 'This ID number is already registered.',
+  });
+  expect(models.users.create).not.toHaveBeenCalled();
+});
+
+test('final signup reports a concurrent duplicate registration', async () => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.users.create.mockRejectedValue(
+    new MongoServerError({ code: 11000, message: 'duplicate key' }),
+  );
+  const response = await api()
+    .post('/sign-up')
+    .send({
+      id: '123456789',
+      email: 'new@example.com',
+      pass: 'password123',
+      firstName: 'John',
+      lastName: 'Smith',
+      city: 'Haifa',
+      street: 'Main 1',
+    })
+    .expect(200);
+  expect(response.body).toEqual({
+    created: false,
+    reason: 'An account with this email or ID number already exists.',
+  });
 });

@@ -95,6 +95,14 @@ export class ApiController {
   }
 
   @Public()
+  @Post('check-signup')
+  @UseGuards(AuthRateLimitGuard)
+  @HttpCode(200)
+  checkSignup(@Body() body: Pick<SignupInput, 'email' | 'id'>) {
+    return this.auth.checkSignup(body);
+  }
+
+  @Public()
   @Post('sign-up')
   @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)

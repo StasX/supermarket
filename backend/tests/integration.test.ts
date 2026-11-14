@@ -172,6 +172,11 @@ test('public storefront is served and protected routes reject anonymous requests
 });
 
 test('signup persists a hashed password, rejects duplicates, and login creates a session', async () => {
+  const available = await request('/check-signup', {
+    method: 'POST',
+    body: { email: registration.email, id: registration.id },
+  });
+  assert.equal(available.body.available, true);
   assert.deepEqual((await request('/sign-up', { method: 'POST', body: registration })).body, {
     created: true,
   });
@@ -179,6 +184,23 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
   assert.notEqual(user.password, password);
   assert.ok(bcrypt.compareSync(password, user.password));
   assert.equal(user.role, 0);
+  for (const [email, id, emailExists, idExists] of [
+    [registration.email, registration.id, true, true],
+    [registration.email, '333444555', true, false],
+    ['different@example.com', registration.id, false, true],
+  ] as const) {
+    const result = await request('/check-signup', { method: 'POST', body: { email, id } });
+    assert.equal(result.body.available, false);
+    assert.equal(result.body.emailExists, emailExists);
+    assert.equal(result.body.idExists, idExists);
+  }
+  const duplicateId = await request('/sign-up', {
+    method: 'POST',
+    body: { ...registration, email: 'different@example.com' },
+  });
+  assert.equal(duplicateId.body.created, false);
+  assert.equal(duplicateId.body.reason, 'This ID number is already registered.');
+
   assert.equal(
     (await request('/sign-up', { method: 'POST', body: registration })).body.created,
     false,
