@@ -1,0 +1,8 @@
+name: Application security
+paths:
+  - backend/src
+  - frontend/src
+paths-ignore:
+  - '**/*.spec.ts'
+queries:
+  - uses: security-extended

@@ -17,6 +17,7 @@ COPY --from=build /out/minio /usr/local/bin/minio
 COPY --from=build /src/LICENSE /usr/share/doc/minio/LICENSE
 USER minio
 EXPOSE 9000 9001
-HEALTHCHECK --interval=5s --timeout=5s --retries=20 CMD ["curl", "--fail", "http://localhost:9000/minio/health/live"]
+HEALTHCHECK --interval=5s --timeout=5s --retries=20 \
+    CMD ["curl", "--fail", "http://localhost:9000/minio/health/live"]
 ENTRYPOINT ["minio"]
 CMD ["server", "/data", "--console-address", ":9001"]

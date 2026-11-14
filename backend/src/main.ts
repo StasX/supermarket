@@ -12,8 +12,10 @@ export async function createApp(rootModule = AppModule) {
 }
 
 if (require.main === module) {
-  createApp().then(app => app.listen(process.env['PORT'] || 3000, '0.0.0.0')).catch(error => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  createApp()
+    .then((app) => app.listen(process.env['PORT'] || 3000, '0.0.0.0'))
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
 }
