@@ -22,6 +22,7 @@ let authRateLimiter = new AuthRateLimitGuard();
 const { MODELS } = require('../dist/database.module');
 const { ImageStorageService } = require('../dist/image-storage.service');
 const { createInvoice } = require('../dist/invoice');
+const { CsrfService } = require('../dist/csrf.service');
 const images = new Map<string, Buffer>();
 const invoiceWrite = jest.fn<(...args: any[]) => Promise<void>>();
 
@@ -90,12 +91,175 @@ let directory: string;
 let oldKeyPath: string | undefined;
 const cookie = (user = customer, options = {}) =>
   `SESSIONID=${jwt.sign({}, key, { subject: user._id, expiresIn: '1h', ...options })}`;
-const api = () => request(app.getHttpServer());
+// Endpoint tests use valid CSRF credentials; dedicated security tests below use
+// raw Supertest requests so missing/forged tokens are never filled in for them.
+const api = () => {
+  const client = request(app.getHttpServer());
+  const post = client.post.bind(client);
+  client.post = (url: string) => {
+    const call = post(url);
+    const set = call.set.bind(call);
+    call.set = (name: string, value: string) => {
+      if (name.toLowerCase() !== 'cookie') return set(name, value);
+      const session = /(?:^|;\s*)SESSIONID=([^;]+)/.exec(value)?.[1] || '';
+      const token = new CsrfService().create(session);
+      set('X-XSRF-TOKEN', token);
+      return set(name, `${value}${value ? '; ' : ''}XSRF-TOKEN=${token}`);
+    };
+    return call.set('Cookie', '');
+  };
+  return client;
+};
 const checkoutBody = {
   cartId: customer._id,
   shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
   payment: { method: 'credit_card', last4: '4242' },
 };
+
+describe('CSRF protection', () => {
+  const raw = () => request(app.getHttpServer());
+  const credentials = (session = '') => {
+    const token = new CsrfService().create(session);
+    return {
+      Cookie: `${session ? `SESSIONID=${session}; ` : ''}XSRF-TOKEN=${token}`,
+      'X-XSRF-TOKEN': token,
+    };
+  };
+
+  test('bootstrap issues a readable, non-cacheable token for anonymous clients', async () => {
+    const response = await raw().get('/csrf-token').expect(200);
+    const tokenCookie = response.headers['set-cookie'][0];
+    expect(tokenCookie).toContain('XSRF-TOKEN=');
+    expect(tokenCookie).not.toContain('HttpOnly');
+    expect(response.headers['cache-control']).toBe('no-store');
+    const token = tokenCookie.split(';')[0].slice('XSRF-TOKEN='.length);
+    expect(new CsrfService().valid(token)).toBe(true);
+  });
+
+  test.each(['/login', '/sign-up'])(
+    'public form %s rejects missing CSRF credentials',
+    async (route) => {
+      await raw().post(route).send({}).expect(403);
+      expect(models.users.findOne).not.toHaveBeenCalled();
+      expect(models.users.create).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([
+    'missing-header',
+    'mismatch',
+    'forged',
+    'wrong-session',
+    'cross-site',
+    'bad-origin',
+    'null-origin',
+    'bad-referer',
+  ])('protected writes reject %s', async (invalid) => {
+    const session = cookie().slice('SESSIONID='.length);
+    const headers: Record<string, string> = credentials(session);
+    if (invalid === 'missing-header') delete headers['X-XSRF-TOKEN'];
+    if (invalid === 'mismatch') headers['X-XSRF-TOKEN'] = new CsrfService().create(session);
+    if (invalid === 'forged') {
+      const forged = 'a'.repeat(64) + '.' + 'b'.repeat(64);
+      headers['Cookie'] = `SESSIONID=${session}; XSRF-TOKEN=${forged}`;
+      headers['X-XSRF-TOKEN'] = forged;
+    }
+    if (invalid === 'wrong-session') {
+      const otherToken = new CsrfService().create('another-session');
+      headers['Cookie'] = `SESSIONID=${session}; XSRF-TOKEN=${otherToken}`;
+      headers['X-XSRF-TOKEN'] = otherToken;
+    }
+    if (invalid === 'cross-site') headers['Sec-Fetch-Site'] = 'cross-site';
+    if (invalid === 'bad-origin') headers['Origin'] = 'https://evil.example';
+    if (invalid === 'null-origin') headers['Origin'] = 'null';
+    if (invalid === 'bad-referer') headers['Referer'] = 'https://evil.example/page';
+    await raw().post('/create-cart').set(headers).send({ products: [] }).expect(403);
+    expect(models.carts.create).not.toHaveBeenCalled();
+  });
+
+  test('same-origin requests with valid tokens reach the handler', async () => {
+    await raw()
+      .post('/sign-up')
+      .set('Host', 'shop.example')
+      .set('Origin', 'https://shop.example')
+      .set(credentials())
+      .send({})
+      .expect(200);
+  });
+
+  test('configured proxy origins are matched exactly', async () => {
+    const previous = process.env['CSRF_TRUSTED_ORIGINS'];
+    process.env['CSRF_TRUSTED_ORIGINS'] = 'https://shop.example';
+    try {
+      await raw()
+        .post('/sign-up')
+        .set('Origin', 'https://shop.example')
+        .set(credentials())
+        .send({})
+        .expect(200);
+      await raw()
+        .post('/sign-up')
+        .set('Origin', 'https://shop.example.evil.test')
+        .set(credentials())
+        .send({})
+        .expect(403);
+      await raw()
+        .post('/sign-up')
+        .set('Origin', 'http://shop.example')
+        .set(credentials())
+        .send({})
+        .expect(403);
+    } finally {
+      if (previous === undefined) delete process.env['CSRF_TRUSTED_ORIGINS'];
+      else process.env['CSRF_TRUSTED_ORIGINS'] = previous;
+    }
+  });
+
+  test('bootstrap binds tokens to an existing session and replicas validate the same signature', async () => {
+    const session = cookie().slice('SESSIONID='.length);
+    const response = await raw()
+      .get('/csrf-token')
+      .set('Cookie', `SESSIONID=${session}`)
+      .expect(200);
+    const token = response.headers['set-cookie'][0].split(';')[0].slice('XSRF-TOKEN='.length);
+    expect(new CsrfService().valid(token, session)).toBe(true);
+    expect(new CsrfService().valid(token, 'different-session')).toBe(false);
+    expect(new CsrfService().valid(token.slice(1), session)).toBe(false);
+    expect(new CsrfService().valid(token + '\n', session)).toBe(false);
+  });
+
+  test('old anonymous tokens cannot be used with a new login session', async () => {
+    models.users.findOne.mockResolvedValue({
+      ...customer,
+      password: await bcrypt.hash('password123', 4),
+    });
+    const anonymous = credentials();
+    const login = await raw()
+      .post('/login')
+      .set(anonymous)
+      .send({ username: customer.username, password: 'password123' })
+      .expect(200);
+    const cookies = login.headers['set-cookie'].map((value: string) => value.split(';')[0]);
+    const session = cookies.find((value: string) => value.startsWith('SESSIONID='));
+    const xsrf = cookies.find((value: string) => value.startsWith('XSRF-TOKEN='));
+    await raw()
+      .post('/logout')
+      .set('Cookie', `${session}; ${anonymous.Cookie}`)
+      .set('X-XSRF-TOKEN', anonymous['X-XSRF-TOKEN'])
+      .expect(403);
+    const logout = await raw()
+      .post('/logout')
+      .set('Cookie', `${session}; ${xsrf}`)
+      .set('X-XSRF-TOKEN', xsrf.slice('XSRF-TOKEN='.length))
+      .expect(200);
+    const nextToken = logout.headers['set-cookie']
+      .find((value: string) => value.startsWith('XSRF-TOKEN='))
+      .split(';')[0]
+      .slice('XSRF-TOKEN='.length);
+    expect(new CsrfService().valid(nextToken)).toBe(true);
+    await raw().get('/logout').set('Cookie', session).expect(404);
+  });
+});
 
 test.each([null, admin])('checkout requires a customer session (%s)', async (user) => {
   const call = api().post('/checkout');
@@ -751,7 +915,7 @@ for (const [route, collection, field] of [
 }
 
 test('logout clears the session cookie', async () => {
-  const result = await api().get('/logout').set('Cookie', cookie()).expect(200);
+  const result = await api().post('/logout').set('Cookie', cookie()).expect(200);
   expect(result.body).toEqual({ success: true });
   expect(result.headers['set-cookie'][0]).toMatch(/SESSIONID=;.*Expires=Thu, 01 Jan 1970/);
 });

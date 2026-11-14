@@ -28,7 +28,7 @@ export interface UserRecord {
 }
 export type SessionUser = UserRecord & { isReturning: boolean };
 export interface SessionRequest extends IncomingMessage {
-  cookies?: { SESSIONID?: unknown };
+  cookies?: { SESSIONID?: unknown; 'XSRF-TOKEN'?: unknown };
   user_data: SessionUser;
 }
 export interface CookieOptions {

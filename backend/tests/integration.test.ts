@@ -33,6 +33,22 @@ const registration = {
   street: 'High Street',
 };
 
+async function csrfHeaders(cookie = '') {
+  const bootstrap = await fetch(base + '/csrf-token', {
+    headers: cookie ? { Cookie: cookie } : {},
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(bootstrap.status, 200);
+  const xsrfCookie = bootstrap.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('XSRF-TOKEN='))!
+    .split(';')[0]!;
+  return {
+    Cookie: [cookie, xsrfCookie].filter(Boolean).join('; '),
+    'X-XSRF-TOKEN': decodeURIComponent(xsrfCookie.slice('XSRF-TOKEN='.length)),
+  };
+}
+
 async function request(
   route: string,
   {
@@ -44,7 +60,10 @@ async function request(
 ) {
   const response = await fetch(base + route, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(method === 'GET' ? (cookie ? { Cookie: cookie } : {}) : await csrfHeaders(cookie)),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
   });
@@ -444,7 +463,7 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
   form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
   const upload = await fetch(base + '/upload-product-image', {
     method: 'POST',
-    headers: { Cookie: adminCookie },
+    headers: await csrfHeaders(adminCookie),
     body: form,
     signal: AbortSignal.timeout(5000),
   });
@@ -470,7 +489,7 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
 });
 
 test('logout expires the browser session cookie', async () => {
-  const logout = await request('/logout', { cookie: customerCookie });
+  const logout = await request('/logout', { method: 'POST', cookie: customerCookie });
   assert.equal(logout.body.success, true);
   assert.ok(logout.cookie, 'Logout must expire the session cookie');
   assert.match(logout.cookie, /SESSIONID=;/);

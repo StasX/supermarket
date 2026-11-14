@@ -32,16 +32,27 @@ import { ShopService } from './shop.service';
 import { InvoiceService } from './invoice.service';
 import { Public, Role, SessionGuard } from './session.guard';
 import { AuthRateLimitGuard } from './auth-rate-limit.guard';
+import { CsrfGuard, CsrfService } from './csrf.service';
 
 @Controller()
-@UseGuards(SessionGuard)
+@UseGuards(SessionGuard, CsrfGuard)
 export class ApiController {
   constructor(
     private readonly auth: AuthService,
     private readonly shop: ShopService,
     private readonly images: ImageStorageService,
     private readonly invoices: InvoiceService,
+    private readonly csrf: CsrfService,
   ) {}
+
+  @Public()
+  @Get('csrf-token')
+  csrfToken(@Req() request: SessionRequest, @Res({ passthrough: true }) response: CookieResponse) {
+    response.setHeader('Cache-Control', 'no-store');
+    const session = request.cookies?.SESSIONID;
+    this.csrf.issue(response, typeof session === 'string' ? session : '');
+    return { success: true };
+  }
 
   @Role(0)
   @Get('orders/:id/invoice')
@@ -86,9 +97,11 @@ export class ApiController {
     return this.auth.signup(body);
   }
 
-  @Get('logout')
+  @Post('logout')
+  @HttpCode(200)
   logout(@Res({ passthrough: true }) response: CookieResponse) {
     response.clearCookie('SESSIONID', { path: '/' });
+    this.csrf.issue(response);
     return { success: true };
   }
 

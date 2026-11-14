@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compare, hash } from 'bcryptjs';
 import { MODELS, DatabaseModels } from './database.module';
+import { CsrfService } from './csrf.service';
 // Keep the untyped CommonJS dependency behind the operations used here.
 const jwt = require('jsonwebtoken') as {
   verify(token: string, key: Buffer, options: { algorithms: string[] }): unknown;
@@ -16,7 +17,10 @@ const jwt = require('jsonwebtoken') as {
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(MODELS) private readonly models: DatabaseModels) {}
+  constructor(
+    @Inject(MODELS) private readonly models: DatabaseModels,
+    private readonly csrf: CsrfService,
+  ) {}
 
   private key() {
     return readFileSync(process.env['JWT_KEY_PATH'] || join(__dirname, '..', 'src', 'key.pem'));
@@ -86,6 +90,7 @@ export class AuthService {
       sameSite: 'lax',
       path: '/',
     });
+    this.csrf.issue(response, token);
     return {
       success: true,
       role: user.role,

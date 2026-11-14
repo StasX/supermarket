@@ -9,6 +9,7 @@ import { SessionGuard } from './session.guard';
 import { ImageStorageService } from './image-storage.service';
 import { InvoiceService } from './invoice.service';
 import { AuthRateLimitGuard } from './auth-rate-limit.guard';
+import { CsrfGuard, CsrfService } from './csrf.service';
 
 @Module({
   imports: [
@@ -29,6 +30,8 @@ import { AuthRateLimitGuard } from './auth-rate-limit.guard';
   ],
   controllers: [ApiController],
   providers: [
+    CsrfService,
+    CsrfGuard,
     AuthService,
     ShopService,
     SessionGuard,
