@@ -1,12 +1,22 @@
 <section class="panel">
-  <span class="eyebrow">YOUR GOOD THINGS, ALL TOGETHER</span>
+  <div class="review-heading">
+    <span class="eyebrow">YOUR GOOD THINGS, ALL TOGETHER</span>
+    <label
+      >Find products<input
+        type="search"
+        placeholder="Enter a product name"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+        aria-controls="order-products"
+    /></label>
+  </div>
   <h1>Review your order</h1>
   @if (cart.busy()) {
   <p role="status">Loading your cart…</p>
   } @if (error()) {
   <p class="error" role="alert">{{ error() }}</p>
   } @if (cart.lines().length) {
-  <table>
+  <table id="order-products">
     <thead>
       <tr>
         <th>Product</th>
@@ -16,9 +26,13 @@
       </tr>
     </thead>
     <tbody>
-      @for (item of cart.lines(); track item.id) {
+      @for (item of highlightedLines(); track item.id) {
       <tr>
-        <td>{{ item.name }}</td>
+        <td>
+          @if (item.matched) {
+          <mark>{{ item.name }}</mark>
+          } @else { {{ item.name }} }
+        </td>
         <td>{{ item.count }}</td>
         <td>{{ item.price | currency: 'USD' }}</td>
         <td>{{ item.price * item.count | currency: 'USD' }}</td>

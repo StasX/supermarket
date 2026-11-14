@@ -128,6 +128,17 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   await page.getByRole('link', { name: 'Review order' }).click();
   await expect(page.getByRole('heading', { name: 'Review your order' })).toBeVisible();
   await expect(page.locator('table')).toContainText('Apple Juice');
+  await page.getByRole('searchbox', { name: 'Find products' }).fill('juice');
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.locator('table mark')).toHaveText('Apple Juice');
+  await page.getByRole('searchbox', { name: 'Find products' }).fill('missing');
+  await expect(page.locator('table mark')).toHaveCount(0);
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.locator('table')).toContainText('Apple Juice');
+  await expect(page.locator('.total')).toContainText('$31.50');
+  await page.getByRole('searchbox', { name: 'Find products' }).fill('');
+  await expect(page.locator('table')).toContainText('Apple Juice');
+
   await page.getByRole('link', { name: 'Continue to checkout' }).click();
   await expect(page.getByRole('heading', { name: 'Checkout', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Back to order review', exact: true })).toHaveCount(

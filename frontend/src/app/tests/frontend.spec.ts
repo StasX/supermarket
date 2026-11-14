@@ -22,6 +22,7 @@ import { AppComponent } from '../components/app/app.component';
 import { LoginPage } from '../pages/login/login.page';
 import { SignupPage } from '../pages/signup/signup.page';
 import { ProductEditorComponent } from '../components/product-editor/product-editor.component';
+import { OrderPage } from '../pages/order/order.page';
 import { CheckoutPage } from '../pages/checkout/checkout.page';
 import { CustomerWelcome } from '../components/customer-welcome/customer-welcome.component';
 import {
@@ -809,5 +810,41 @@ describe('signup account availability', () => {
     await pending;
     expect(page.step()).toBe(1);
     expect(page.error()).toContain('details changed');
+  });
+});
+
+describe('order review search', () => {
+  it('highlights whole matching product names while keeping every row and the full total', async () => {
+    const fixture = TestBed.createComponent(OrderPage);
+    const page = fixture.componentInstance;
+    vi.spyOn(page.cart, 'load').mockResolvedValue();
+    page.cart.catalog.set([product, { ...product, id: 'p2', name: 'Milk', price: 4 }]);
+    page.cart.items.set([
+      { id: 'p1', count: 2, price: 10.5 },
+      { id: 'p2', count: 1, price: 4 },
+    ]);
+    fixture.detectChanges();
+    const input: HTMLInputElement = fixture.nativeElement.querySelector('input[type=search]');
+    for (const [query, names] of [
+      ['  jUiCe  ', ['Juice']],
+      ['i', ['Juice', 'Milk']],
+      ['.', []],
+      ['missing', []],
+      ['', []],
+    ] as const) {
+      input.value = query;
+      input.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+      expect(
+        Array.from(fixture.nativeElement.querySelectorAll('mark'), (mark: any) => mark.textContent),
+      ).toEqual(names);
+      expect(fixture.nativeElement.querySelectorAll('tbody tr')).toHaveLength(2);
+      expect(fixture.nativeElement.querySelector('tbody').textContent).toContain('Milk');
+      expect(page.cart.total()).toBe(25);
+      expect(page.cart.items()).toHaveLength(2);
+      expect(fixture.nativeElement.querySelector('a.button').textContent).toContain(
+        'Continue to checkout',
+      );
+    }
   });
 });

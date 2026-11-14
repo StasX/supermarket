@@ -51,6 +51,8 @@ The storefront, customer checkout flow, and administrator workspace are shown be
 
 **Order review**
 
+Use **Find products** beside the heading to highlight the entire product name when it contains the search text. Matching is case-insensitive; all rows remain visible, and clearing the field removes the highlights. Cart contents and the checkout total stay unchanged.
+
 ![Order review with products, quantities, and totals](docs/screenshots/user/order-review.png)
 
 </details>
