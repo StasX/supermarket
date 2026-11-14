@@ -21,13 +21,17 @@ export class CsrfService {
   }
 
   valid(token: unknown, session = '') {
-    if (
-      typeof token !== 'string' ||
-      token.length !== 129 ||
-      !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(token)
-    )
-      return false;
-    const [nonce, signature] = token.split('.') as [string, string];
+    if (typeof token !== 'string' || token.length !== 129 || token[64] !== '.') return false;
+    // Validate the entire encoding before decoding: Buffer.from(hex) can silently
+    // truncate malformed input. The loop always examines at most 129 characters.
+    for (let index = 0; index < token.length; index++) {
+      if (index === 64) continue;
+      const character = token.charCodeAt(index);
+      if (!((character >= 48 && character <= 57) || (character >= 97 && character <= 102)))
+        return false;
+    }
+    const nonce = token.slice(0, 64);
+    const signature = token.slice(65);
     return timingSafeEqual(
       Buffer.from(signature, 'hex'),
       Buffer.from(this.signature(nonce, session), 'hex'),

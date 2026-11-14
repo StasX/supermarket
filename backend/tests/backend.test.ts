@@ -117,6 +117,19 @@ const checkoutBody = {
 };
 
 describe('CSRF protection', () => {
+  test.each([
+    null,
+    {},
+    '',
+    'a'.repeat(10000),
+    'a'.repeat(64) + ':' + 'b'.repeat(64),
+    'g' + 'a'.repeat(63) + '.' + 'b'.repeat(64),
+    'a'.repeat(64) + '.' + 'b'.repeat(63) + 'G',
+    'a'.repeat(64) + '.' + 'b'.repeat(63) + '\n',
+    'a'.repeat(64) + '.' + 'b'.repeat(63) + '\0',
+  ])('rejects malformed CSRF encoding (%#) without throwing', (token) => {
+    expect(new CsrfService().valid(token)).toBe(false);
+  });
   const raw = () => request(app.getHttpServer());
   const credentials = (session = '') => {
     const token = new CsrfService().create(session);
