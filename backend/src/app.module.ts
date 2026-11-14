@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { DatabaseModule } from './database.module';
 import { ApiController } from './api.controller';
 import { AuthService } from './auth.service';
-import { ShopService } from './shop.service';
+import { ProductsService } from './products.service';
+import { CartsService } from './carts.service';
+import { CheckoutService } from './checkout.service';
 import { SessionGuard } from './session.guard';
 import { ImageStorageService } from './image-storage.service';
 import { InvoiceService } from './invoice.service';
@@ -34,7 +36,9 @@ import { CsrfGuard, CsrfService } from './csrf.service';
     CsrfService,
     CsrfGuard,
     AuthService,
-    ShopService,
+    ProductsService,
+    CartsService,
+    CheckoutService,
     SessionGuard,
     AuthRateLimitGuard,
     AuthRateLimitStore,

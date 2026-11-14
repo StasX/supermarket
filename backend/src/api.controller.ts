@@ -28,7 +28,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import { ImageStorageService } from './image-storage.service';
 import { AuthService } from './auth.service';
-import { ShopService } from './shop.service';
+import { ProductsService } from './products.service';
+import { CartsService } from './carts.service';
+import { CheckoutService } from './checkout.service';
 import { InvoiceService } from './invoice.service';
 import { Public, Role, SessionGuard } from './session.guard';
 import { AuthRateLimitGuard } from './auth-rate-limit.guard';
@@ -39,7 +41,9 @@ import { CsrfGuard, CsrfService } from './csrf.service';
 export class ApiController {
   constructor(
     private readonly auth: AuthService,
-    private readonly shop: ShopService,
+    private readonly productsService: ProductsService,
+    private readonly cartsService: CartsService,
+    private readonly checkoutService: CheckoutService,
     private readonly images: ImageStorageService,
     private readonly invoices: InvoiceService,
     private readonly csrf: CsrfService,
@@ -120,33 +124,33 @@ export class ApiController {
 
   @Get('get-all-products')
   products() {
-    return this.shop.products();
+    return this.productsService.products();
   }
 
   @Post('get-products-by-category')
   @HttpCode(200)
   category(@Body() body: CategoryInput) {
-    return this.shop.category(body);
+    return this.productsService.category(body);
   }
 
   @Post('find-product')
   @HttpCode(200)
   find(@Body() body: SearchInput) {
-    return this.shop.find(body);
+    return this.productsService.find(body);
   }
 
   @Role(1)
   @Post('add-product')
   @HttpCode(200)
   add(@Body() body: ProductInput) {
-    return this.shop.saveProduct(body);
+    return this.productsService.saveProduct(body);
   }
 
   @Role(1)
   @Post('edit-product')
   @HttpCode(200)
   edit(@Body() body: ProductInput) {
-    return this.shop.saveProduct(body, true);
+    return this.productsService.saveProduct(body, true);
   }
 
   @Role(1)
@@ -174,46 +178,46 @@ export class ApiController {
   @Role(0)
   @Get('total-orders')
   ordersCount() {
-    return this.shop.count('orders', 'ordersCount');
+    return this.checkoutService.count();
   }
 
   @Role(0)
   @Get('total-products')
   productsCount() {
-    return this.shop.count('products', 'productsCount');
+    return this.productsService.count();
   }
 
   @Role(0)
   @Post('create-cart')
   @HttpCode(200)
   createCart(@Req() request: SessionRequest, @Body() body: CartInput) {
-    return this.shop.createCart(request.user_data, body);
+    return this.cartsService.createCart(request.user_data, body);
   }
 
   @Role(0)
   @Post('update-cart')
   @HttpCode(200)
   updateCart(@Req() request: SessionRequest, @Body() body: CartInput) {
-    return this.shop.updateCart(request.user_data, body);
+    return this.cartsService.updateCart(request.user_data, body);
   }
 
   @Role(0)
   @Get('get-cart')
   cart(@Req() request: SessionRequest) {
-    return this.shop.cart(request.user_data);
+    return this.cartsService.cart(request.user_data);
   }
 
   @Role(0)
   @Get('get-last-order')
   lastOrder(@Req() request: SessionRequest) {
-    return this.shop.lastOrder(request.user_data);
+    return this.checkoutService.lastOrder(request.user_data);
   }
 
   @Role(0)
   @Post('checkout')
   @HttpCode(200)
   checkout(@Req() request: SessionRequest, @Body() body: CheckoutInput) {
-    return this.shop.checkout(request.user_data, body);
+    return this.checkoutService.checkout(request.user_data, body);
   }
 }
 
