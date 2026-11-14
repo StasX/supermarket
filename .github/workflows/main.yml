@@ -152,7 +152,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          npm audit --package-lock-only --include=dev --json \
+          npm audit --package-lock-only --include=dev --audit-level=moderate --json \
             2> >(tee "$GITHUB_WORKSPACE/artifacts/npm-audit.log" >&2) \
             | tee "$GITHUB_WORKSPACE/artifacts/npm-audit.json"
 

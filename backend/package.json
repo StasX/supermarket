@@ -33,6 +33,12 @@
     "supertest": "^7.3.2",
     "typescript": "^7.0.2"
   },
+  "overrides": {
+    "jest": {
+      "glob": "14.0.6",
+      "minimatch": "11.0.8"
+    }
+  },
   "engines": {
     "node": "^26.13.1"
   }
