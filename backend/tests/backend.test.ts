@@ -15,6 +15,7 @@ import { Readable } from 'node:stream';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { NotFoundException } from '@nestjs/common';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 const { AppModule } = require('../dist/app.module');
 const { AuthRateLimitGuard } = require('../dist/auth-rate-limit.guard');
 let authRateLimiter = new AuthRateLimitGuard();
@@ -23,6 +24,52 @@ const { ImageStorageService } = require('../dist/image-storage.service');
 const { createInvoice } = require('../dist/invoice');
 const images = new Map<string, Buffer>();
 const invoiceWrite = jest.fn<(...args: any[]) => Promise<void>>();
+
+describe('invoice storage conditional creation', () => {
+  test('concurrent uploads use create-only writes and accept an existing invoice', async () => {
+    const first = Buffer.from('first PDF');
+    const second = Buffer.from('competing PDF');
+    const send = jest
+      .spyOn(S3Client.prototype, 'send')
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce({ $metadata: { httpStatusCode: 412 } } as never);
+    const storage = new ImageStorageService();
+    try {
+      await expect(
+        Promise.all([storage.putInvoice('order-1', first), storage.putInvoice('order-1', second)]),
+      ).resolves.toEqual([undefined, undefined]);
+      expect(send).toHaveBeenCalledTimes(2);
+      for (const [index, bytes] of [first, second].entries()) {
+        const command = send.mock.calls[index]![0];
+        expect(command).toBeInstanceOf(PutObjectCommand);
+        expect((command as PutObjectCommand).input).toMatchObject({
+          Key: 'invoices/order-1.pdf',
+          Body: bytes,
+          ContentType: 'application/pdf',
+          IfNoneMatch: '*',
+        });
+      }
+    } finally {
+      send.mockRestore();
+      storage.onModuleDestroy();
+    }
+  });
+
+  test.each([403, 409, 500, 503])(
+    'upload failure %s is propagated instead of claiming an invoice was saved',
+    async (status) => {
+      const error = { $metadata: { httpStatusCode: status } };
+      const send = jest.spyOn(S3Client.prototype, 'send').mockRejectedValue(error as never);
+      const storage = new ImageStorageService();
+      try {
+        await expect(storage.putInvoice('order-1', Buffer.from('PDF'))).rejects.toBe(error);
+      } finally {
+        send.mockRestore();
+        storage.onModuleDestroy();
+      }
+    },
+  );
+});
 
 const customer = {
   _id: '507f1f77bcf86cd799439011',
@@ -146,6 +193,117 @@ test('checkout retries a closed cart using its original snapshot', async () => {
   expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 12 } });
   expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
   expect(models.orders.findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: snapshot });
+});
+
+test.each([
+  'after cart closure',
+  'before order insert',
+  'after order insert',
+  'before invoice upload',
+  'after invoice upload',
+  'before invoice marker update',
+])('checkout recovers from an interruption %s', async (failurePoint) => {
+  // Keep durable state separate from returned documents to model a lost response
+  // after a successful write, as well as failures before the next write starts.
+  let cart: any = {
+    _id: customer._id,
+    user_id: customer.id,
+    status: 1,
+    products: [{ id: admin._id, count: 2, price: 0.01 }],
+  };
+  let order: any;
+  let interrupted = false;
+  let orderCreates = 0;
+  let invoiceCreates = 0;
+  const invoiceKey = `invoices/${customer._id}.pdf`;
+  const interrupt = (point: string) => {
+    if (!interrupted && point === failurePoint) {
+      interrupted = true;
+      throw new Error(`Injected interruption ${point}`);
+    }
+  };
+  models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Original juice', price: 5.25 }]);
+  models.carts.findOne.mockImplementation(async () => structuredClone(cart));
+  models.carts.findOneAndUpdate.mockImplementation(async (_query, update) => {
+    cart = { ...cart, ...structuredClone(update.$set) };
+    interrupt('after cart closure');
+    return structuredClone(cart);
+  });
+  models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => {
+    if (update.$setOnInsert) {
+      interrupt('before order insert');
+      if (!order) {
+        order = { _id: customer._id, ...structuredClone(update.$setOnInsert) };
+        orderCreates++;
+      }
+      interrupt('after order insert');
+    } else {
+      interrupt('before invoice marker update');
+      Object.assign(order, update.$set);
+    }
+    return structuredClone(order);
+  });
+  invoiceWrite.mockImplementation(async (_id: string, bytes: Buffer) => {
+    interrupt('before invoice upload');
+    if (!images.has(invoiceKey)) {
+      images.set(invoiceKey, Buffer.from(bytes));
+      invoiceCreates++;
+    }
+    interrupt('after invoice upload');
+  });
+
+  await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody).expect(500);
+  expect(interrupted).toBe(true);
+  expect(cart.status).toBe(0);
+  expect(cart.checkout.price).toBe(10.5);
+  const frozenSnapshot = structuredClone(cart.checkout);
+  const originalInvoice = images.get(invoiceKey);
+  if (['after cart closure', 'before order insert'].includes(failurePoint)) {
+    expect(order).toBeUndefined();
+    expect(invoiceWrite).not.toHaveBeenCalled();
+  } else {
+    expect(orderCreates).toBe(1);
+    expect(order.invoiceKey).toBeUndefined();
+  }
+  if (['after invoice upload', 'before invoice marker update'].includes(failurePoint)) {
+    expect(originalInvoice).toBeDefined();
+  } else {
+    expect(originalInvoice).toBeUndefined();
+  }
+
+  // Neither later catalog edits nor a changed retry payload may change a closed
+  // cart's snapshot. Repeating checkout must recover the existing order/PDF.
+  models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Changed juice', price: 99 }]);
+  const retryBody = {
+    ...checkoutBody,
+    shipping: { ...checkoutBody.shipping, street: 'Changed street' },
+    payment: { method: 'credit_card', last4: '9999' },
+  };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await api().post('/checkout').set('Cookie', cookie()).send(retryBody).expect(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      order: {
+        id: customer._id,
+        total: 10.5,
+        products: [{ name: 'Original juice', count: 2, price: 5.25 }],
+        shipping: { street: checkoutBody.shipping.street },
+        payment: { last4: '4242' },
+        invoiceUrl: `/orders/${customer._id}/invoice`,
+      },
+    });
+  }
+  expect(cart.checkout).toEqual(frozenSnapshot);
+  expect(orderCreates).toBe(1);
+  expect(invoiceCreates).toBe(1);
+  expect(order.invoiceKey).toBe(invoiceKey);
+  expect(models.carts.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  expect(models.products.find).toHaveBeenCalledTimes(1);
+  const invoice = images.get(invoiceKey)!;
+  expect(invoice.toString()).toMatch(/^%PDF-/);
+  expect(invoice.toString()).toContain('Original juice');
+  expect(invoice.toString()).not.toContain('Changed juice');
+  if (originalInvoice) expect(invoice).toEqual(originalInvoice);
 });
 
 test('PDF invoices include the review table, frozen line prices and shipping details', () => {
