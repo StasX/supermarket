@@ -18,6 +18,29 @@ const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
+const { AuthRateLimitStore } = require('../dist/auth-rate-limit.store');
+
+test('Redis rate limits are atomic across replicas and expire without extending the window', async () => {
+  const first = new AuthRateLimitStore();
+  const second = new AuthRateLimitStore();
+  const key = `integration:${randomBytes(16).toString('hex')}`;
+  try {
+    await Promise.all([first.onModuleInit(), second.onModuleInit()]);
+    const results = await Promise.all(
+      Array.from({ length: 40 }, (_, i) => (i % 2 ? first : second).consume(key, 20, 1000)),
+    );
+    assert.equal(results.filter((result) => result.allowed).length, 20);
+    assert.equal(results.filter((result) => !result.allowed).length, 20);
+    assert.ok(results.every((result) => result.retryAfter === 1));
+    first.onModuleDestroy();
+    assert.equal((await second.consume(key, 20, 1000)).allowed, false);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal((await second.consume(key, 20, 1000)).allowed, true);
+  } finally {
+    first.onModuleDestroy();
+    second.onModuleDestroy();
+  }
+});
 
 let server: ChildProcessByStdio<null, Readable, Readable>;
 let base: string, temporaryDirectory: string, customerCookie: string, adminCookie: string;

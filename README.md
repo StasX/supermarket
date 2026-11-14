@@ -37,6 +37,9 @@ integration_tests/
   Dockerfile   Non-root integration-test runner
 minio/
   Dockerfile   MinIO server built from pinned source
+redis/
+  Dockerfile   Redis image with a health check and non-root user
+  redis.conf   Persistence and rate-limit memory configuration
 .github/
   workflows/   Tests, security scans, and report artifacts
 ```
@@ -131,7 +134,7 @@ docker compose -p supermarket-integration -f integration.compose.yml up --build 
 docker compose -p supermarket-integration -f integration.compose.yml down --volumes
 ```
 
-The suite uses isolated MongoDB and MinIO containers with temporary data and a separate signing key. Its S3 settings and disposable credentials live in `integration_tests/.env.integration`, independently of the local `.env`. It also verifies concurrent checkout, invoice persistence and ownership, and uploaded images served through the API. The test runner runs as the non-root `node` user. It explicitly uses `HEALTHCHECK NONE` with a documented `CKV_DOCKER_2` exception: this is a one-shot process whose exit code determines success, rather than a long-running service. MongoDB and MinIO retain their health checks. GitHub Actions runs the suite in the integration job and always cleans up the containers.
+The suite uses isolated MongoDB, Redis, and MinIO containers with temporary data and a separate signing key. Its S3 settings and disposable credentials live in `integration_tests/.env.integration`, independently of the local `.env`. It also verifies concurrent checkout, invoice persistence and ownership, and uploaded images served through the API. The test runner runs as the non-root `node` user. It explicitly uses `HEALTHCHECK NONE` with a documented `CKV_DOCKER_2` exception: this is a one-shot process whose exit code determines success, rather than a long-running service. MongoDB and MinIO retain their health checks. GitHub Actions runs the suite in the integration job and always cleans up the containers.
 
 With Docker Compose running and Google Chrome installed, run `npm --prefix frontend run test:e2e` for Playwright browser tests. Customer signup/cart operations and administrator image editing use mocked API responses to avoid changing database records. The administrator smoke test uses the documented demo login against the running backend and reads products without editing them. Override `E2E_BASE_URL` if the app is not on port 3000. For Playwright's bundled browser, run `npx playwright install chromium` from `frontend` and set `PLAYWRIGHT_CHANNEL=chromium`. Tests write HTML reports to `frontend/playwright-report` and JUnit XML to `frontend/test-results/junit.xml`, retaining traces and screenshots on failure. They run in their own CI job with Chromium and a fresh Compose deployment; CI retries failed tests twice and rejects focused `test.only` tests.
 
@@ -139,16 +142,16 @@ With Docker Compose running and Google Chrome installed, run `npm --prefix front
 
 [`.github/workflows/main.yml`](.github/workflows/main.yml) runs on pushes, pull requests, and manual dispatches. Jobs run independently:
 
-| Job                 | Scope and output                                                                                                                                                                              |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit/HTTP tests     | Angular and NestJS tests, test logs, and compiled frontend/backend builds.                                                                                                                    |
-| Integration tests   | Real MongoDB and MinIO, including checkout and invoices; test logs and container diagnostics.                                                                                                 |
-| Playwright          | Browser flows against the application; HTML/JUnit reports, failure traces/screenshots, and container diagnostics.                                                                             |
-| CodeQL              | Backend/frontend TypeScript with extended security queries, configured in [`.github/codeql-config.yml`](.github/codeql-config.yml); SARIF results.                                            |
-| NodeJsScan          | Compiled backend JavaScript in `backend/dist`; SARIF results. TypeScript is compiled first because the scanner's default file selection targets JavaScript.                                   |
-| Semgrep TypeScript  | `p/typescript` rules against `backend/src` and `frontend/src`; JSON results and logs.                                                                                                         |
-| npm audit           | Separate root, backend, and frontend lockfile audits, including development dependencies; JSON results and logs.                                                                              |
-| Dockerfile security | Independent Checkov, Semgrep (`p/dockerfile`), and Trivy configuration scans of `Dockerfile`, `db/Dockerfile`, `minio/Dockerfile`, and `integration_tests/Dockerfile`; JSON results and logs. |
+| Job                 | Scope and output                                                                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit/HTTP tests     | Angular and NestJS tests, test logs, and compiled frontend/backend builds.                                                                                                                                        |
+| Integration tests   | Real MongoDB and MinIO, including checkout and invoices; test logs and container diagnostics.                                                                                                                     |
+| Playwright          | Browser flows against the application; HTML/JUnit reports, failure traces/screenshots, and container diagnostics.                                                                                                 |
+| CodeQL              | Backend/frontend TypeScript with extended security queries, configured in [`.github/codeql-config.yml`](.github/codeql-config.yml); SARIF results.                                                                |
+| NodeJsScan          | Compiled backend JavaScript in `backend/dist`; SARIF results. TypeScript is compiled first because the scanner's default file selection targets JavaScript.                                                       |
+| Semgrep TypeScript  | `p/typescript` rules against `backend/src` and `frontend/src`; JSON results and logs.                                                                                                                             |
+| npm audit           | Separate root, backend, and frontend lockfile audits, including development dependencies; JSON results and logs.                                                                                                  |
+| Dockerfile security | Independent Checkov, Semgrep (`p/dockerfile`), and Trivy configuration scans of `Dockerfile`, `db/Dockerfile`, `minio/Dockerfile`, `redis/Dockerfile`, and `integration_tests/Dockerfile`; JSON results and logs. |
 
 Reports upload as workflow artifacts even when their scan/test step fails and are retained for 14 days. Files are available only if the producing step reached report generation. CodeQL and NodeJsScan also upload SARIF to GitHub code scanning, which must be enabled for the repository. CodeQL reports alerts; it does not automatically fail the job solely because alerts exist. Semgrep fails on findings or scan errors, NodeJsScan fails on warning/error findings, and Checkov/Trivy fail on unsuppressed findings.
 
@@ -384,7 +387,7 @@ The API rejects `Sec-Fetch-Site: cross-site` writes and validates Origin (or Ref
 
 ## Authentication rate limits
 
-Login allows 20 requests and signup allows 5 requests per connection peer IP address per 15-minute window, with independent limits for each endpoint. All attempts count, including successful and invalid requests. Excess requests return HTTP 429 with `{ "success": false, "reason": "Too many attempts. Please try again later." }` and a `Retry-After` header in seconds. Limits are held in memory per application process and reset on restart; replicas do not share counters. Forwarding headers are ignored to prevent spoofing, so clients behind a reverse proxy share its peer-address limit. Multi-instance deployments should enforce shared limits at the ingress or use a shared limiter store.
+Login allows 20 requests and signup allows 5 requests per connection peer IP address per 15-minute window, with independent limits for each endpoint. All attempts count, including successful and invalid requests. Excess requests return HTTP 429 with `{ "success": false, "reason": "Too many attempts. Please try again later." }` and a `Retry-After` header in seconds. Limits are stored in Redis using an atomic Lua script so application replicas share counters and application restarts preserve active windows. Set `REDIS_URL` to the same Redis instance on every replica (default `redis://127.0.0.1:6379` for direct startup; Compose uses `redis://redis:6379`). Redis expires counters automatically after 15 minutes; rejected attempts do not extend the window. If Redis is unavailable, authentication fails closed with HTTP 503 and `Retry-After: 5`. Both Compose files build `redis/Dockerfile`, which loads `redis/redis.conf`, includes a health check, and runs as the Redis user. The configuration enables append-only persistence and a 128 MB no-eviction memory limit. Compose includes a private Redis service with append-only persistence in the `redis_data` volume and a no-eviction memory limit. Forwarding headers are ignored to prevent spoofing, so clients behind a reverse proxy share its peer-address limit. For direct local startup, run Redis and override `REDIS_URL` if the root `.env` points to the Compose hostname.
 
 ## Demo checkout
 

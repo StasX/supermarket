@@ -9,6 +9,7 @@ import { SessionGuard } from './session.guard';
 import { ImageStorageService } from './image-storage.service';
 import { InvoiceService } from './invoice.service';
 import { AuthRateLimitGuard } from './auth-rate-limit.guard';
+import { AuthRateLimitStore } from './auth-rate-limit.store';
 import { CsrfGuard, CsrfService } from './csrf.service';
 
 @Module({
@@ -36,6 +37,7 @@ import { CsrfGuard, CsrfService } from './csrf.service';
     ShopService,
     SessionGuard,
     AuthRateLimitGuard,
+    AuthRateLimitStore,
     ImageStorageService,
     InvoiceService,
   ],

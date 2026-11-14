@@ -18,7 +18,21 @@ import { NotFoundException } from '@nestjs/common';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 const { AppModule } = require('../dist/app.module');
 const { AuthRateLimitGuard } = require('../dist/auth-rate-limit.guard');
-let authRateLimiter = new AuthRateLimitGuard();
+const { AuthRateLimitStore } = require('../dist/auth-rate-limit.store');
+const rateBuckets = new Map<string, { count: number; expires: number }>();
+const rateStore = {
+  async consume(key: string, limit: number, windowMs: number) {
+    let bucket = rateBuckets.get(key);
+    if (!bucket || bucket.expires <= Date.now()) {
+      bucket = { count: 0, expires: Date.now() + windowMs };
+      rateBuckets.set(key, bucket);
+    }
+    const allowed = bucket.count < limit;
+    if (allowed) bucket.count++;
+    return { allowed, retryAfter: Math.ceil((bucket.expires - Date.now()) / 1000) };
+  },
+};
+let authRateLimiter = new AuthRateLimitGuard(rateStore);
 const { MODELS } = require('../dist/database.module');
 const { ImageStorageService } = require('../dist/image-storage.service');
 const { createInvoice } = require('../dist/invoice');
@@ -727,6 +741,8 @@ beforeAll(async () => {
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideGuard(AuthRateLimitGuard)
     .useValue({ canActivate: (context: any) => authRateLimiter.canActivate(context) })
+    .overrideProvider(AuthRateLimitStore)
+    .useValue(rateStore)
     .overrideProvider(MODELS)
     .useValue(models)
     .overrideProvider(ImageStorageService)
@@ -755,7 +771,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  authRateLimiter = new AuthRateLimitGuard();
+  rateBuckets.clear();
+  authRateLimiter = new AuthRateLimitGuard(rateStore);
   jest.resetAllMocks();
   images.clear();
   invoiceWrite.mockImplementation(async (id: string, bytes: Buffer) => {
@@ -995,7 +1012,7 @@ test.each([
   },
 );
 
-test('authentication rate limits are independent for different peer addresses', () => {
+test('authentication rate limits are shared across guards and independent for different peer addresses', async () => {
   const context = (address: string) => ({
     getHandler: () => ({ name: 'login' }),
     switchToHttp: () => ({
@@ -1003,9 +1020,31 @@ test('authentication rate limits are independent for different peer addresses', 
       getResponse: () => ({ setHeader: jest.fn() }),
     }),
   });
-  for (let i = 0; i < 20; i++) authRateLimiter.canActivate(context('192.0.2.1'));
-  expect(() => authRateLimiter.canActivate(context('192.0.2.1'))).toThrow();
-  expect(authRateLimiter.canActivate(context('192.0.2.2'))).toBe(true);
+  const otherReplica = new AuthRateLimitGuard(rateStore);
+  for (let i = 0; i < 20; i++) {
+    await (i % 2 ? otherReplica : authRateLimiter).canActivate(context('192.0.2.1'));
+  }
+  await expect(otherReplica.canActivate(context('192.0.2.1'))).rejects.toThrow();
+  await expect(authRateLimiter.canActivate(context('192.0.2.2'))).resolves.toBe(true);
+});
+
+test('authentication fails closed when the shared store is unavailable', async () => {
+  const guard = new AuthRateLimitGuard({
+    consume: async () => {
+      throw new Error('offline');
+    },
+  });
+  const setHeader = jest.fn();
+  await expect(
+    guard.canActivate({
+      getHandler: () => ({ name: 'login' }),
+      switchToHttp: () => ({
+        getRequest: () => ({ socket: { remoteAddress: '192.0.2.1' } }),
+        getResponse: () => ({ setHeader }),
+      }),
+    }),
+  ).rejects.toMatchObject({ status: 503 });
+  expect(setHeader).toHaveBeenCalledWith('Retry-After', 5);
 });
 
 test('login sets an HTTP-only cookie without exposing the password hash in its payload', async () => {
