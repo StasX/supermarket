@@ -1,0 +1,40 @@
+<ng-container [formGroup]="form()">
+  <legend>Payment</legend>
+  <div class="checkout-fields">
+    <label
+      >Cardholder name<input
+        formControlName="cardholder"
+        (dblclick)="autofill.emit('cardholder')"
+        autocomplete="off"
+        maxlength="100"
+        required
+    /></label>
+    <label
+      >Card number<input
+        formControlName="number"
+        inputmode="numeric"
+        autocomplete="off"
+        placeholder="5800 5800 5800 5800"
+        required
+    /></label>
+    <label
+      >Expiry date<input
+        formControlName="expiry"
+        inputmode="numeric"
+        autocomplete="off"
+        placeholder="MM/YY"
+        maxlength="5"
+        required
+    /></label>
+    <label
+      >Security code<input
+        type="password"
+        formControlName="cvc"
+        inputmode="numeric"
+        autocomplete="off"
+        placeholder="123"
+        maxlength="3"
+        required
+    /></label>
+  </div>
+</ng-container>

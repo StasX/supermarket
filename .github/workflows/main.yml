@@ -197,7 +197,7 @@ jobs:
                 --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
                 --workdir /workspace --entrypoint checkov "$SCANNER_IMAGE" \
                 --file Dockerfile --file db/Dockerfile --file minio/Dockerfile \
-                --file integration_tests/Dockerfile --framework dockerfile \
+                --file redis/Dockerfile --file integration_tests/Dockerfile --framework dockerfile \
                 --skip-download --output json \
                 2> >(tee artifacts/checkov.log >&2) | tee artifacts/checkov.json
               ;;
@@ -206,7 +206,7 @@ jobs:
                 --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
                 --workdir /workspace --entrypoint semgrep "$SCANNER_IMAGE" \
                 scan --config p/dockerfile --error --strict --metrics=off --json \
-                Dockerfile db/Dockerfile minio/Dockerfile integration_tests/Dockerfile \
+                Dockerfile db/Dockerfile minio/Dockerfile redis/Dockerfile integration_tests/Dockerfile \
                 2> >(tee artifacts/semgrep.log >&2) | tee artifacts/semgrep.json
               ;;
             trivy)
@@ -214,6 +214,7 @@ jobs:
                 --mount "type=bind,source=$GITHUB_WORKSPACE/Dockerfile,target=/scan/Dockerfile,readonly" \
                 --mount "type=bind,source=$GITHUB_WORKSPACE/db/Dockerfile,target=/scan/db/Dockerfile,readonly" \
                 --mount "type=bind,source=$GITHUB_WORKSPACE/minio/Dockerfile,target=/scan/minio/Dockerfile,readonly" \
+                --mount "type=bind,source=$GITHUB_WORKSPACE/redis/Dockerfile,target=/scan/redis/Dockerfile,readonly" \
                 --mount "type=bind,source=$GITHUB_WORKSPACE/integration_tests/Dockerfile,target=/scan/integration_tests/Dockerfile,readonly" \
                 "$SCANNER_IMAGE" \
                 config --misconfig-scanners dockerfile --exit-code 1 --format json \

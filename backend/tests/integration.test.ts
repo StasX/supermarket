@@ -13,11 +13,34 @@ import { once } from 'node:events';
 import mongoose from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
-const { createStorageClient } = require('../dist/image-storage.service');
+const { createStorageClient } = require('../dist/services/image-storage.service');
 const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
+const { AuthRateLimitStore } = require('../dist/stores/auth-rate-limit.store');
+
+test('Redis rate limits are atomic across replicas and expire without extending the window', async () => {
+  const first = new AuthRateLimitStore();
+  const second = new AuthRateLimitStore();
+  const key = `integration:${randomBytes(16).toString('hex')}`;
+  try {
+    await Promise.all([first.onModuleInit(), second.onModuleInit()]);
+    const results = await Promise.all(
+      Array.from({ length: 40 }, (_, i) => (i % 2 ? first : second).consume(key, 20, 1000)),
+    );
+    assert.equal(results.filter((result) => result.allowed).length, 20);
+    assert.equal(results.filter((result) => !result.allowed).length, 20);
+    assert.ok(results.every((result) => result.retryAfter === 1));
+    first.onModuleDestroy();
+    assert.equal((await second.consume(key, 20, 1000)).allowed, false);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal((await second.consume(key, 20, 1000)).allowed, true);
+  } finally {
+    first.onModuleDestroy();
+    second.onModuleDestroy();
+  }
+});
 
 let server: ChildProcessByStdio<null, Readable, Readable>;
 let base: string, temporaryDirectory: string, customerCookie: string, adminCookie: string;
@@ -33,6 +56,22 @@ const registration = {
   street: 'High Street',
 };
 
+async function csrfHeaders(cookie = '') {
+  const bootstrap = await fetch(base + '/csrf-token', {
+    headers: cookie ? { Cookie: cookie } : {},
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(bootstrap.status, 200);
+  const xsrfCookie = bootstrap.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('XSRF-TOKEN='))!
+    .split(';')[0]!;
+  return {
+    Cookie: [cookie, xsrfCookie].filter(Boolean).join('; '),
+    'X-XSRF-TOKEN': decodeURIComponent(xsrfCookie.slice('XSRF-TOKEN='.length)),
+  };
+}
+
 async function request(
   route: string,
   {
@@ -44,7 +83,10 @@ async function request(
 ) {
   const response = await fetch(base + route, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(method === 'GET' ? (cookie ? { Cookie: cookie } : {}) : await csrfHeaders(cookie)),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
   });
@@ -130,6 +172,11 @@ test('public storefront is served and protected routes reject anonymous requests
 });
 
 test('signup persists a hashed password, rejects duplicates, and login creates a session', async () => {
+  const available = await request('/check-signup', {
+    method: 'POST',
+    body: { email: registration.email, id: registration.id },
+  });
+  assert.equal(available.body.available, true);
   assert.deepEqual((await request('/sign-up', { method: 'POST', body: registration })).body, {
     created: true,
   });
@@ -137,6 +184,23 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
   assert.notEqual(user.password, password);
   assert.ok(bcrypt.compareSync(password, user.password));
   assert.equal(user.role, 0);
+  for (const [email, id, emailExists, idExists] of [
+    [registration.email, registration.id, true, true],
+    [registration.email, '333444555', true, false],
+    ['different@example.com', registration.id, false, true],
+  ] as const) {
+    const result = await request('/check-signup', { method: 'POST', body: { email, id } });
+    assert.equal(result.body.available, false);
+    assert.equal(result.body.emailExists, emailExists);
+    assert.equal(result.body.idExists, idExists);
+  }
+  const duplicateId = await request('/sign-up', {
+    method: 'POST',
+    body: { ...registration, email: 'different@example.com' },
+  });
+  assert.equal(duplicateId.body.created, false);
+  assert.equal(duplicateId.body.reason, 'This ID number is already registered.');
+
   assert.equal(
     (await request('/sign-up', { method: 'POST', body: registration })).body.created,
     false,
@@ -444,7 +508,7 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
   form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
   const upload = await fetch(base + '/upload-product-image', {
     method: 'POST',
-    headers: { Cookie: adminCookie },
+    headers: await csrfHeaders(adminCookie),
     body: form,
     signal: AbortSignal.timeout(5000),
   });
@@ -470,10 +534,43 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
 });
 
 test('logout expires the browser session cookie', async () => {
-  const logout = await request('/logout', { cookie: customerCookie });
+  const logout = await request('/logout', { method: 'POST', cookie: customerCookie });
   assert.equal(logout.body.success, true);
   assert.ok(logout.cookie, 'Logout must expire the session cookie');
   assert.match(logout.cookie, /SESSIONID=;/);
   assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
   assert.equal((await request('/reconect', { status: 401 })).body.success, false);
+});
+
+test('only administrators can delete products and deletion persists in MongoDB', async () => {
+  const product = await Product.create({
+    name: 'Disposable product',
+    category: 'Milk & Eggs',
+    price: 1.25,
+    image: '/products/edam.png',
+  });
+  const body = { id: String(product._id) };
+  const login = await request('/login', {
+    method: 'POST',
+    body: { username: registration.email, password },
+  });
+  const activeCustomerCookie = login.cookie!.split(';')[0];
+  await request('/delete-product', {
+    method: 'POST',
+    body,
+    cookie: activeCustomerCookie,
+    status: 403,
+  });
+  assert.ok(await Product.findById(product._id));
+  assert.equal(
+    (await request('/delete-product', { method: 'POST', body, cookie: adminCookie })).body.success,
+    true,
+  );
+  assert.equal(await Product.findById(product._id), null);
+  const catalog = (await request('/get-all-products', { cookie: adminCookie })).body;
+  assert.ok(!catalog.products.some((item: { id: string }) => item.id === body.id));
+  assert.equal(
+    (await request('/delete-product', { method: 'POST', body, cookie: adminCookie })).body.success,
+    false,
+  );
 });

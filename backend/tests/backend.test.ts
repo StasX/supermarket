@@ -16,12 +16,27 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { NotFoundException } from '@nestjs/common';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-const { AppModule } = require('../dist/app.module');
-const { AuthRateLimitGuard } = require('../dist/auth-rate-limit.guard');
-let authRateLimiter = new AuthRateLimitGuard();
-const { MODELS } = require('../dist/database.module');
-const { ImageStorageService } = require('../dist/image-storage.service');
-const { createInvoice } = require('../dist/invoice');
+const { AppModule } = require('../dist/modules/app.module');
+const { AuthRateLimitGuard } = require('../dist/guards/auth-rate-limit.guard');
+const { AuthRateLimitStore } = require('../dist/stores/auth-rate-limit.store');
+const rateBuckets = new Map<string, { count: number; expires: number }>();
+const rateStore = {
+  async consume(key: string, limit: number, windowMs: number) {
+    let bucket = rateBuckets.get(key);
+    if (!bucket || bucket.expires <= Date.now()) {
+      bucket = { count: 0, expires: Date.now() + windowMs };
+      rateBuckets.set(key, bucket);
+    }
+    const allowed = bucket.count < limit;
+    if (allowed) bucket.count++;
+    return { allowed, retryAfter: Math.ceil((bucket.expires - Date.now()) / 1000) };
+  },
+};
+let authRateLimiter = new AuthRateLimitGuard(rateStore);
+const { MODELS } = require('../dist/modules/database.module');
+const { ImageStorageService } = require('../dist/services/image-storage.service');
+const { createInvoice } = require('../dist/utils/invoice');
+const { CsrfService } = require('../dist/services/csrf.service');
 const images = new Map<string, Buffer>();
 const invoiceWrite = jest.fn<(...args: any[]) => Promise<void>>();
 
@@ -83,19 +98,201 @@ const key = 'test-only-session-signing-key';
 let app: INestApplication;
 type Collection = 'users' | 'products' | 'carts' | 'orders';
 type ModelMethod =
-  'find' | 'findOne' | 'create' | 'countDocuments' | 'findByIdAndUpdate' | 'findOneAndUpdate';
+  | 'find'
+  | 'findOne'
+  | 'create'
+  | 'countDocuments'
+  | 'findByIdAndUpdate'
+  | 'findByIdAndDelete'
+  | 'findOneAndUpdate';
 type MockModels = Record<Collection, Record<ModelMethod, jest.Mock<(...args: any[]) => any>>>;
 let models: MockModels;
 let directory: string;
 let oldKeyPath: string | undefined;
 const cookie = (user = customer, options = {}) =>
   `SESSIONID=${jwt.sign({}, key, { subject: user._id, expiresIn: '1h', ...options })}`;
-const api = () => request(app.getHttpServer());
+// Endpoint tests use valid CSRF credentials; dedicated security tests below use
+// raw Supertest requests so missing/forged tokens are never filled in for them.
+const api = () => {
+  const client = request(app.getHttpServer());
+  const post = client.post.bind(client);
+  client.post = (url: string) => {
+    const call = post(url);
+    const set = call.set.bind(call);
+    call.set = (name: string, value: string) => {
+      if (name.toLowerCase() !== 'cookie') return set(name, value);
+      const session = /(?:^|;\s*)SESSIONID=([^;]+)/.exec(value)?.[1] || '';
+      const token = new CsrfService().create(session);
+      set('X-XSRF-TOKEN', token);
+      return set(name, `${value}${value ? '; ' : ''}XSRF-TOKEN=${token}`);
+    };
+    return call.set('Cookie', '');
+  };
+  return client;
+};
 const checkoutBody = {
   cartId: customer._id,
   shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
   payment: { method: 'credit_card', last4: '4242' },
 };
+
+describe('CSRF protection', () => {
+  test.each([
+    null,
+    {},
+    '',
+    'a'.repeat(10000),
+    'a'.repeat(64) + ':' + 'b'.repeat(64),
+    'g' + 'a'.repeat(63) + '.' + 'b'.repeat(64),
+    'a'.repeat(64) + '.' + 'b'.repeat(63) + 'G',
+    'a'.repeat(64) + '.' + 'b'.repeat(63) + '\n',
+    'a'.repeat(64) + '.' + 'b'.repeat(63) + '\0',
+  ])('rejects malformed CSRF encoding (%#) without throwing', (token) => {
+    expect(new CsrfService().valid(token)).toBe(false);
+  });
+  const raw = () => request(app.getHttpServer());
+  const credentials = (session = '') => {
+    const token = new CsrfService().create(session);
+    return {
+      Cookie: `${session ? `SESSIONID=${session}; ` : ''}XSRF-TOKEN=${token}`,
+      'X-XSRF-TOKEN': token,
+    };
+  };
+
+  test('bootstrap issues a readable, non-cacheable token for anonymous clients', async () => {
+    const response = await raw().get('/csrf-token').expect(200);
+    const tokenCookie = response.headers['set-cookie'][0];
+    expect(tokenCookie).toContain('XSRF-TOKEN=');
+    expect(tokenCookie).not.toContain('HttpOnly');
+    expect(response.headers['cache-control']).toBe('no-store');
+    const token = tokenCookie.split(';')[0].slice('XSRF-TOKEN='.length);
+    expect(new CsrfService().valid(token)).toBe(true);
+  });
+
+  test.each(['/login', '/sign-up', '/check-signup'])(
+    'public form %s rejects missing CSRF credentials',
+    async (route) => {
+      await raw().post(route).send({}).expect(403);
+      expect(models.users.findOne).not.toHaveBeenCalled();
+      expect(models.users.create).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([
+    'missing-header',
+    'mismatch',
+    'forged',
+    'wrong-session',
+    'cross-site',
+    'bad-origin',
+    'null-origin',
+    'bad-referer',
+  ])('protected writes reject %s', async (invalid) => {
+    const session = cookie().slice('SESSIONID='.length);
+    const headers: Record<string, string> = credentials(session);
+    if (invalid === 'missing-header') delete headers['X-XSRF-TOKEN'];
+    if (invalid === 'mismatch') headers['X-XSRF-TOKEN'] = new CsrfService().create(session);
+    if (invalid === 'forged') {
+      const forged = 'a'.repeat(64) + '.' + 'b'.repeat(64);
+      headers['Cookie'] = `SESSIONID=${session}; XSRF-TOKEN=${forged}`;
+      headers['X-XSRF-TOKEN'] = forged;
+    }
+    if (invalid === 'wrong-session') {
+      const otherToken = new CsrfService().create('another-session');
+      headers['Cookie'] = `SESSIONID=${session}; XSRF-TOKEN=${otherToken}`;
+      headers['X-XSRF-TOKEN'] = otherToken;
+    }
+    if (invalid === 'cross-site') headers['Sec-Fetch-Site'] = 'cross-site';
+    if (invalid === 'bad-origin') headers['Origin'] = 'https://evil.example';
+    if (invalid === 'null-origin') headers['Origin'] = 'null';
+    if (invalid === 'bad-referer') headers['Referer'] = 'https://evil.example/page';
+    await raw().post('/create-cart').set(headers).send({ products: [] }).expect(403);
+    expect(models.carts.create).not.toHaveBeenCalled();
+  });
+
+  test('same-origin requests with valid tokens reach the handler', async () => {
+    await raw()
+      .post('/sign-up')
+      .set('Host', 'shop.example')
+      .set('Origin', 'https://shop.example')
+      .set(credentials())
+      .send({})
+      .expect(200);
+  });
+
+  test('configured proxy origins are matched exactly', async () => {
+    const previous = process.env['CSRF_TRUSTED_ORIGINS'];
+    process.env['CSRF_TRUSTED_ORIGINS'] = 'https://shop.example';
+    try {
+      await raw()
+        .post('/sign-up')
+        .set('Origin', 'https://shop.example')
+        .set(credentials())
+        .send({})
+        .expect(200);
+      await raw()
+        .post('/sign-up')
+        .set('Origin', 'https://shop.example.evil.test')
+        .set(credentials())
+        .send({})
+        .expect(403);
+      await raw()
+        .post('/sign-up')
+        .set('Origin', 'http://shop.example')
+        .set(credentials())
+        .send({})
+        .expect(403);
+    } finally {
+      if (previous === undefined) delete process.env['CSRF_TRUSTED_ORIGINS'];
+      else process.env['CSRF_TRUSTED_ORIGINS'] = previous;
+    }
+  });
+
+  test('bootstrap binds tokens to an existing session and replicas validate the same signature', async () => {
+    const session = cookie().slice('SESSIONID='.length);
+    const response = await raw()
+      .get('/csrf-token')
+      .set('Cookie', `SESSIONID=${session}`)
+      .expect(200);
+    const token = response.headers['set-cookie'][0].split(';')[0].slice('XSRF-TOKEN='.length);
+    expect(new CsrfService().valid(token, session)).toBe(true);
+    expect(new CsrfService().valid(token, 'different-session')).toBe(false);
+    expect(new CsrfService().valid(token.slice(1), session)).toBe(false);
+    expect(new CsrfService().valid(token + '\n', session)).toBe(false);
+  });
+
+  test('old anonymous tokens cannot be used with a new login session', async () => {
+    models.users.findOne.mockResolvedValue({
+      ...customer,
+      password: await bcrypt.hash('password123', 4),
+    });
+    const anonymous = credentials();
+    const login = await raw()
+      .post('/login')
+      .set(anonymous)
+      .send({ username: customer.username, password: 'password123' })
+      .expect(200);
+    const cookies = login.headers['set-cookie'].map((value: string) => value.split(';')[0]);
+    const session = cookies.find((value: string) => value.startsWith('SESSIONID='));
+    const xsrf = cookies.find((value: string) => value.startsWith('XSRF-TOKEN='));
+    await raw()
+      .post('/logout')
+      .set('Cookie', `${session}; ${anonymous.Cookie}`)
+      .set('X-XSRF-TOKEN', anonymous['X-XSRF-TOKEN'])
+      .expect(403);
+    const logout = await raw()
+      .post('/logout')
+      .set('Cookie', `${session}; ${xsrf}`)
+      .set('X-XSRF-TOKEN', xsrf.slice('XSRF-TOKEN='.length))
+      .expect(200);
+    const nextToken = logout.headers['set-cookie']
+      .find((value: string) => value.startsWith('XSRF-TOKEN='))
+      .split(';')[0]
+      .slice('XSRF-TOKEN='.length);
+    expect(new CsrfService().valid(nextToken)).toBe(true);
+    await raw().get('/logout').set('Cookie', session).expect(404);
+  });
+});
 
 test.each([null, admin])('checkout requires a customer session (%s)', async (user) => {
   const call = api().post('/checkout');
@@ -539,6 +736,7 @@ beforeAll(async () => {
           'create',
           'countDocuments',
           'findByIdAndUpdate',
+          'findByIdAndDelete',
           'findOneAndUpdate',
         ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
       ),
@@ -550,6 +748,8 @@ beforeAll(async () => {
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideGuard(AuthRateLimitGuard)
     .useValue({ canActivate: (context: any) => authRateLimiter.canActivate(context) })
+    .overrideProvider(AuthRateLimitStore)
+    .useValue(rateStore)
     .overrideProvider(MODELS)
     .useValue(models)
     .overrideProvider(ImageStorageService)
@@ -578,7 +778,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  authRateLimiter = new AuthRateLimitGuard();
+  rateBuckets.clear();
+  authRateLimiter = new AuthRateLimitGuard(rateStore);
   jest.resetAllMocks();
   images.clear();
   invoiceWrite.mockImplementation(async (id: string, bytes: Buffer) => {
@@ -751,7 +952,7 @@ for (const [route, collection, field] of [
 }
 
 test('logout clears the session cookie', async () => {
-  const result = await api().get('/logout').set('Cookie', cookie()).expect(200);
+  const result = await api().post('/logout').set('Cookie', cookie()).expect(200);
   expect(result.body).toEqual({ success: true });
   expect(result.headers['set-cookie'][0]).toMatch(/SESSIONID=;.*Expires=Thu, 01 Jan 1970/);
 });
@@ -759,6 +960,7 @@ test('logout clears the session cookie', async () => {
 for (const [method, route, allowedRole] of [
   ['post', 'add-product', 1],
   ['post', 'edit-product', 1],
+  ['post', 'delete-product', 1],
   ['get', 'get-last-order', 0],
   ['get', 'total-orders', 0],
   ['get', 'total-products', 0],
@@ -781,6 +983,7 @@ for (const [method, route, allowedRole] of [
 test.each([
   ['login', 20],
   ['sign-up', 5],
+  ['check-signup', 5],
 ] as const)(
   '%s limits requests before accessing the database and allows requests after expiry',
   async (route, limit) => {
@@ -818,7 +1021,7 @@ test.each([
   },
 );
 
-test('authentication rate limits are independent for different peer addresses', () => {
+test('authentication rate limits are shared across guards and independent for different peer addresses', async () => {
   const context = (address: string) => ({
     getHandler: () => ({ name: 'login' }),
     switchToHttp: () => ({
@@ -826,9 +1029,31 @@ test('authentication rate limits are independent for different peer addresses', 
       getResponse: () => ({ setHeader: jest.fn() }),
     }),
   });
-  for (let i = 0; i < 20; i++) authRateLimiter.canActivate(context('192.0.2.1'));
-  expect(() => authRateLimiter.canActivate(context('192.0.2.1'))).toThrow();
-  expect(authRateLimiter.canActivate(context('192.0.2.2'))).toBe(true);
+  const otherReplica = new AuthRateLimitGuard(rateStore);
+  for (let i = 0; i < 20; i++) {
+    await (i % 2 ? otherReplica : authRateLimiter).canActivate(context('192.0.2.1'));
+  }
+  await expect(otherReplica.canActivate(context('192.0.2.1'))).rejects.toThrow();
+  await expect(authRateLimiter.canActivate(context('192.0.2.2'))).resolves.toBe(true);
+});
+
+test('authentication fails closed when the shared store is unavailable', async () => {
+  const guard = new AuthRateLimitGuard({
+    consume: async () => {
+      throw new Error('offline');
+    },
+  });
+  const setHeader = jest.fn();
+  await expect(
+    guard.canActivate({
+      getHandler: () => ({ name: 'login' }),
+      switchToHttp: () => ({
+        getRequest: () => ({ socket: { remoteAddress: '192.0.2.1' } }),
+        getResponse: () => ({ setHeader }),
+      }),
+    }),
+  ).rejects.toMatchObject({ status: 503 });
+  expect(setHeader).toHaveBeenCalledWith('Retry-After', 5);
 });
 
 test('login sets an HTTP-only cookie without exposing the password hash in its payload', async () => {
@@ -1195,4 +1420,124 @@ describe.each(['create-cart', 'update-cart'])('%s validates cart contents', (rou
 
 test('unknown endpoints return 404', async () => {
   await api().get('/unknown').expect(404);
+});
+
+test.each([undefined, '', 'invalid', { $ne: null }])(
+  'product deletion rejects invalid id %j',
+  async (id) => {
+    const response = await api()
+      .post('/delete-product')
+      .set('Cookie', cookie(admin))
+      .send({ id })
+      .expect(200);
+    expect(response.body).toEqual({ success: false });
+    expect(models.products.findByIdAndDelete).not.toHaveBeenCalled();
+  },
+);
+
+test.each([true, false])(
+  'product deletion reports whether a product was removed (%s)',
+  async (exists) => {
+    models.products.findByIdAndDelete.mockResolvedValue(exists ? { _id: customer._id } : null);
+    const response = await api()
+      .post('/delete-product')
+      .set('Cookie', cookie(admin))
+      .send({ id: customer._id })
+      .expect(200);
+    expect(response.body).toEqual({ success: exists });
+    expect(models.products.findByIdAndDelete).toHaveBeenCalledWith(customer._id);
+  },
+);
+
+test('product deletion rejects anonymous and unverified requests', async () => {
+  await api().post('/delete-product').send({ id: customer._id }).expect(401);
+  await request(app.getHttpServer())
+    .post('/delete-product')
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id })
+    .expect(403);
+  expect(models.products.findByIdAndDelete).not.toHaveBeenCalled();
+});
+
+test.each([
+  [false, false, undefined],
+  [true, false, 'This email is already registered.'],
+  [false, true, 'This ID number is already registered.'],
+  [true, true, 'This email and ID number are already registered.'],
+])(
+  'signup availability checks email and ID independently (%s, %s)',
+  async (emailExists, idExists, reason) => {
+    models.users.findOne.mockImplementation(async (query) =>
+      query.username ? (emailExists ? customer : null) : idExists ? customer : null,
+    );
+    const response = await api()
+      .post('/check-signup')
+      .send({ email: customer.username, id: '123456789' })
+      .expect(200);
+    expect(response.body).toEqual({
+      success: true,
+      available: !emailExists && !idExists,
+      emailExists,
+      idExists,
+      ...(reason ? { reason } : {}),
+    });
+    expect(models.users.findOne).toHaveBeenCalledWith({ username: customer.username });
+    expect(models.users.findOne).toHaveBeenCalledWith({ id: 123456789 });
+    expect(models.users.create).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  { email: { $ne: null }, id: '123456789' },
+  { email: 'buyer@example.com', id: { $ne: null } },
+  { email: 'invalid', id: '1' },
+])('signup availability rejects malformed input %j', async (body) => {
+  const response = await api().post('/check-signup').send(body).expect(200);
+  expect(response.body.available).toBe(false);
+  expect(response.body.success).toBe(false);
+  expect(models.users.findOne).not.toHaveBeenCalled();
+});
+
+test('final signup rejects an existing ID even with a different email', async () => {
+  models.users.findOne.mockImplementation(async (query) => (query.id ? customer : null));
+  const response = await api()
+    .post('/sign-up')
+    .send({
+      id: '123456789',
+      email: 'new@example.com',
+      pass: 'password123',
+      firstName: 'John',
+      lastName: 'Smith',
+      city: 'Haifa',
+      street: 'Main 1',
+    })
+    .expect(200);
+  expect(response.body).toEqual({
+    created: false,
+    reason: 'This ID number is already registered.',
+  });
+  expect(models.users.create).not.toHaveBeenCalled();
+});
+
+test('final signup reports a concurrent duplicate registration', async () => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.users.create.mockRejectedValue(
+    new MongoServerError({ code: 11000, message: 'duplicate key' }),
+  );
+  const response = await api()
+    .post('/sign-up')
+    .send({
+      id: '123456789',
+      email: 'new@example.com',
+      pass: 'password123',
+      firstName: 'John',
+      lastName: 'Smith',
+      city: 'Haifa',
+      street: 'Main 1',
+    })
+    .expect(200);
+  expect(response.body).toEqual({
+    created: false,
+    reason: 'An account with this email or ID number already exists.',
+  });
 });

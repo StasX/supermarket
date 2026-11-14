@@ -9,15 +9,26 @@ services:
       PORT: ${PORT}
       MONGODB_URI: ${MONGODB_URI}
       JWT_KEY_PATH: ${JWT_KEY_PATH}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     env_file:
       - .env
     volumes:
       - app_keys:/app/keys
     depends_on:
+      redis:
+        condition: service_healthy
       mongodb:
         condition: service_healthy
       minio:
         condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    build:
+      context: .
+      dockerfile: redis/Dockerfile
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
   minio:
@@ -45,6 +56,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  redis_data:
   mongodb_data:
   app_keys:
   minio_data:

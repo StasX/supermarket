@@ -1,0 +1,21 @@
+@use '../../../styles/variables' as *;
+
+.review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+
+  label {
+    width: 260px;
+    max-width: 100%;
+  }
+}
+
+mark {
+  background: $surface-active;
+  color: inherit;
+  border-radius: 2px;
+}

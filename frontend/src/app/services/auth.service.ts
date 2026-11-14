@@ -1,0 +1,78 @@
+import { HttpErrorResponse } from '@angular/common/http';
+import { inject, Injectable, signal } from '@angular/core';
+import { ApiService } from './api.service';
+import { User, Result } from '../models/api.models';
+
+@Injectable({ providedIn: 'root' })
+export class AuthService {
+  private readonly api = inject(ApiService);
+  readonly user = signal<User | null>(null);
+  private reconnecting?: Promise<User | null>;
+
+  async login(username: string, password: string) {
+    const result = await this.api
+      .login(username, password)
+      .catch((error: unknown): Result & Partial<User> => {
+        if (error instanceof HttpErrorResponse && error.status === 401) {
+          this.user.set(null);
+          return { success: false };
+        }
+        throw error;
+      });
+    if (!result.success || result.user === undefined || result.role === undefined) {
+      return false;
+    }
+    this.user.set({
+      user: result.user,
+      role: result.role,
+      name: result.name ?? '',
+      address: result.address,
+      isReturning: result.isReturning,
+    });
+    return true;
+  }
+
+  async reconnect() {
+    if (this.user()) {
+      return this.user();
+    }
+    if (this.reconnecting) {
+      return this.reconnecting;
+    }
+    this.reconnecting = this.api
+      .reconnect()
+      .then((result) => {
+        if (result.success && result.user && result.role !== undefined) {
+          const name =
+            typeof result.name === 'object'
+              ? `${result.name.first_name} ${result.name.last_name}`
+              : (result.name ?? '');
+          this.user.set({
+            user: result.user,
+            role: result.role,
+            name,
+            address: result.address,
+            isReturning: result.isReturning,
+          });
+        }
+        return this.user();
+      })
+      .catch(() => null)
+      .finally(() => {
+        this.reconnecting = undefined;
+      });
+    return this.reconnecting;
+  }
+
+  async logout() {
+    const result = await this.api.logout().catch((error: unknown) => {
+      // An expired session is already signed out.
+      if (error instanceof HttpErrorResponse && error.status === 401) return { success: true };
+      throw error;
+    });
+    if (!result.success) {
+      throw new Error('Sign out failed. Please try again.');
+    }
+    this.user.set(null);
+  }
+}

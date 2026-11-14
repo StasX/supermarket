@@ -1,10 +1,12 @@
 {
+  "/csrf-token": { "target": "http://localhost:3000" },
   "/orders/**": { "target": "http://localhost:3000" },
   "/checkout": { "target": "http://localhost:3000" },
   "/upload-product-image": { "target": "http://localhost:3000" },
   "/products/**": { "target": "http://localhost:3000" },
   "/login": { "target": "http://localhost:3000" },
   "/sign-up": { "target": "http://localhost:3000" },
+  "/check-signup": { "target": "http://localhost:3000" },
   "/logout": { "target": "http://localhost:3000" },
   "/reconect": { "target": "http://localhost:3000" },
   "/get-*": { "target": "http://localhost:3000" },
@@ -12,6 +14,7 @@
   "/find-product": { "target": "http://localhost:3000" },
   "/add-product": { "target": "http://localhost:3000" },
   "/edit-product": { "target": "http://localhost:3000" },
+  "/delete-product": { "target": "http://localhost:3000" },
   "/create-cart": { "target": "http://localhost:3000" },
   "/update-cart": { "target": "http://localhost:3000" }
 }

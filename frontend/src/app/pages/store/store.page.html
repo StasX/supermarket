@@ -1,0 +1,62 @@
+<section class="store-hero">
+  <div>
+    <span class="eyebrow">YOUR EVERYDAY MARKET</span>
+    <h1>Store</h1>
+    <h2>A basket full of<br /><em>good things.</em></h2>
+    <p>Everyday essentials. New favourites. A little inspiration for your next meal.</p>
+    <a href="#products" class="hero-link" (click)="$event.preventDefault(); browse()"
+      >Explore the shelves <span aria-hidden="true">↓</span></a
+    >
+  </div>
+  <img src="assets/img/market-basket.svg" alt="A basket filled with fresh market favourites" /><span
+    class="hero-stamp"
+    aria-hidden="true"
+    >GOOD FOOD<br />GOOD MOOD</span
+  >
+</section>
+<div class="shop-layout store-layout" id="products">
+  <app-cart />
+  <section class="shelves">
+    <div class="section-heading">
+      <div>
+        <span class="eyebrow">FIND YOUR FAVOURITES</span>
+        <h2>The market shelves</h2>
+      </div>
+      <span class="result-count">{{ products().length }} products</span>
+    </div>
+    <form class="search" (ngSubmit)="loadProducts()">
+      <label
+        >Find a product<input
+          type="search"
+          name="search"
+          [(ngModel)]="search"
+          placeholder="Find product" /></label
+      ><button type="submit" [disabled]="loading()">Search</button>
+    </form>
+    <nav class="categories" aria-label="Product categories">
+      <button type="button" [class.selected]="!category" (click)="filter('')">All products</button>
+      @for (name of categories; track name) {
+      <button type="button" [class.selected]="category === name" (click)="filter(name)">
+        {{ name }}
+      </button>
+      }
+    </nav>
+    @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+    } @if (loading()) {
+    <p role="status">Loading products…</p>
+    }
+    <div class="products">
+      @for (product of products(); track product.id) {
+      <article
+        app-product-card
+        [product]="product"
+        [disabled]="cart.busy() || loading()"
+        (selected)="add($event)"
+      ></article>
+      } @empty { @if (!loading()) {
+      <p>No products found.</p>
+      } }
+    </div>
+  </section>
+</div>

@@ -128,6 +128,17 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   await page.getByRole('link', { name: 'Review order' }).click();
   await expect(page.getByRole('heading', { name: 'Review your order' })).toBeVisible();
   await expect(page.locator('table')).toContainText('Apple Juice');
+  await page.getByRole('searchbox', { name: 'Find products' }).fill('juice');
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.locator('table mark')).toHaveText('Apple Juice');
+  await page.getByRole('searchbox', { name: 'Find products' }).fill('missing');
+  await expect(page.locator('table mark')).toHaveCount(0);
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.locator('table')).toContainText('Apple Juice');
+  await expect(page.locator('.total')).toContainText('$31.50');
+  await page.getByRole('searchbox', { name: 'Find products' }).fill('');
+  await expect(page.locator('table')).toContainText('Apple Juice');
+
   await page.getByRole('link', { name: 'Continue to checkout' }).click();
   await expect(page.getByRole('heading', { name: 'Checkout', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Back to order review', exact: true })).toHaveCount(
@@ -156,6 +167,9 @@ test('two-step signup validates confirmation and submits the existing API payloa
   page,
 }) => {
   await page.route('**/sign-up', (route) => route.fulfill({ json: { created: true } }));
+  await page.route('**/check-signup', (route) =>
+    route.fulfill({ json: { success: true, available: true } }),
+  );
   await page.goto('/#/sign-up');
   await page.getByLabel('ID number').fill('123456789');
   await page.getByLabel('Email', { exact: true }).fill('test@example.com');
@@ -193,7 +207,11 @@ test('live demo administrator can sign in, search products, reconnect and sign o
   await page.goto('/#/login');
   await page.getByLabel('Email', { exact: true }).fill('j.smith@example.com');
   await page.getByLabel('Password', { exact: true }).fill('sec907@Ad0');
+  const loginRequest = page.waitForRequest(
+    (request) => request.url().endsWith('/login') && request.method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  expect((await loginRequest).headers()['x-xsrf-token']).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/);
   await expect(page.getByRole('heading', { name: 'Product manager' })).toBeVisible();
   await expect(page.locator('.product').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('management.png'), fullPage: true });
@@ -202,7 +220,11 @@ test('live demo administrator can sign in, search products, reconnect and sign o
   await expect(page.locator('.product').first()).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Product manager' })).toBeVisible();
+  const logoutRequest = page.waitForRequest((request) => request.url().endsWith('/logout'));
   await page.getByRole('button', { name: 'Sign out' }).click();
+  const logout = await logoutRequest;
+  expect(logout.method()).toBe('POST');
+  expect(logout.headers()['x-xsrf-token']).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -267,4 +289,82 @@ test('redesigned login and storefront fit desktop and mobile screens', async ({
     ).toBe(true);
   }
   await page.screenshot({ path: testInfo.outputPath('store-mobile.png'), fullPage: true });
+});
+
+test('administrator confirms product deletion and can cancel without changing the catalog', async ({
+  page,
+}) => {
+  let products = [
+    { id: 'p1', name: 'Edam', category: 'Milk & Eggs', price: 5.25, image: '/products/edam.png' },
+  ];
+  let deletes = 0;
+  await page.route('**/reconect', (route) =>
+    route.fulfill({ json: { success: true, role: 1, user: 'admin', name: 'Shop Admin' } }),
+  );
+  await page.route('**/get-all-products', (route) =>
+    route.fulfill({ json: { success: true, products } }),
+  );
+  await page.route('**/delete-product', async (route) => {
+    deletes++;
+    expect(route.request().postDataJSON()).toEqual({ id: 'p1' });
+    expect(route.request().headers()['x-xsrf-token']).toBeTruthy();
+    if (deletes === 1) {
+      await route.fulfill({ status: 500, json: { success: false } });
+      return;
+    }
+    products = [];
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.goto('/#/management');
+  await page.getByRole('button', { name: 'Edit Edam' }).click();
+  await page.getByRole('button', { name: 'Delete Edam', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete product?' });
+  await expect(dialog).toContainText('Are you realy want to delete Edam?');
+  await dialog.getByRole('button', { name: 'No', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(deletes).toBe(0);
+  await expect(page.getByRole('button', { name: 'Delete Edam', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete Edam', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Yes', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Unable to delete the product');
+  await expect(page.locator('.products .product')).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'Yes', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.products .product')).toHaveCount(0);
+  await expect(page.getByLabel('Product name')).toHaveValue('');
+  await expect(page.getByText('Edam deleted.', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.products .product')).toHaveCount(0);
+  expect(deletes).toBe(2);
+});
+
+test('signup Continue blocks registered emails and IDs before asking for personal details', async ({
+  page,
+}) => {
+  let reason = 'This email is already registered.';
+  await page.route('**/check-signup', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      email: 'existing@example.com',
+      id: '123456789',
+    });
+    await route.fulfill({ json: { success: true, available: !reason, reason } });
+  });
+  await page.goto('/#/sign-up');
+  await page.getByLabel('ID number').fill('123456789');
+  await page.getByLabel('Email', { exact: true }).fill('existing@example.com');
+  await page.getByLabel('Password', { exact: true }).fill('password123');
+  await page.getByLabel('Confirm password').fill('password123');
+  for (const message of [
+    'This email is already registered.',
+    'This ID number is already registered.',
+  ]) {
+    reason = message;
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText(message);
+    await expect(page.getByText('Step 1 of 2')).toBeVisible();
+    await expect(page.getByLabel('First name')).toHaveCount(0);
+  }
+  reason = '';
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('First name')).toBeVisible();
 });

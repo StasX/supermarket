@@ -1,0 +1,18 @@
+@use 'variables' as *;
+
+.error {
+  color: $error-text;
+  background: $error-background;
+  border-left: 3px solid $error-border;
+  padding: 13px 16px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.hint {
+  color: $muted;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  margin: 0;
+}

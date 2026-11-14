@@ -1,4 +1,4 @@
-import type { OrderRecord } from '../contracts';
+import type { OrderRecord } from '../types/contracts';
 import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
 const orderSchema = new Schema<OrderRecord>({

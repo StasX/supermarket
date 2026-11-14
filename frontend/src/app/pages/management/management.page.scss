@@ -1,0 +1,14 @@
+@use '../../../styles/variables' as *;
+
+dialog {
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid $line;
+  border-radius: 16px;
+  background: $surface;
+  color: $ink;
+
+  &::backdrop {
+    background: #0008;
+  }
+}

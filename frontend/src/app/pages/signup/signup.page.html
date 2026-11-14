@@ -1,0 +1,94 @@
+<div class="auth-layout signup-layout">
+  <aside class="auth-story">
+    <span class="eyebrow">A PLACE IN YOUR DAILY ROUTINE</span>
+    <h2>Meet your<br />new favourite<br /><em>market.</em></h2>
+    <p>A basket of possibilities.<br />A little inspiration for every day.</p>
+    <img
+      class="market-art"
+      src="assets/img/market-basket.svg"
+      alt="An illustrated basket of fresh groceries"
+    />
+  </aside>
+  <section class="panel auth-panel">
+    <span class="eyebrow">LET’S MAKE YOU FEEL AT HOME</span>
+    <h1>Create an account</h1>
+    <div class="signup-progress">
+      <span [class.current]="step() === 1">01 <span>Your account</span></span
+      ><i></i><span [class.current]="step() === 2">02 <span>Your details</span></span>
+    </div>
+    <p class="step-label">Step {{ step() }} of 2</p>
+    @if (step() === 1) {
+    <form [formGroup]="account" (ngSubmit)="next()">
+      <label
+        >ID number<input
+          formControlName="id"
+          inputmode="numeric"
+          maxlength="9"
+          [readonly]="busy()"
+          required
+      /></label>
+      <label
+        >Email<input
+          type="email"
+          formControlName="email"
+          autocomplete="email"
+          [readonly]="busy()"
+          required
+      /></label>
+      <label
+        >Password<input
+          type="password"
+          formControlName="pass"
+          autocomplete="new-password"
+          [readonly]="busy()"
+          required
+      /></label>
+      <label
+        >Confirm password<input
+          type="password"
+          formControlName="confirm"
+          autocomplete="new-password"
+          [readonly]="busy()"
+          required
+      /></label>
+      <p class="hint">Use a 9-digit ID and a password of at least 8 characters.</p>
+      <button type="submit" [disabled]="busy()">{{ busy() ? 'Checking...' : 'Continue' }}</button>
+    </form>
+    } @else {
+    <form [formGroup]="details" (ngSubmit)="submit()">
+      <label
+        >First name<input formControlName="firstName" autocomplete="given-name" required
+      /></label>
+      <label
+        >Last name<input formControlName="lastName" autocomplete="family-name" required
+      /></label>
+      <label
+        >City<input
+          formControlName="city"
+          autocomplete="address-level2"
+          list="signup-cities"
+          required
+        />
+        <datalist id="signup-cities">
+          @for (city of cities; track city) {
+          <option [value]="city"></option>
+          }
+        </datalist></label
+      >
+      <label>Street<input formControlName="street" autocomplete="street-address" required /></label>
+      <p class="hint">
+        Names and addresses can use any language, apostrophes, and hyphens (up to 150 characters).
+      </p>
+      <div class="actions">
+        <button type="button" class="secondary" (click)="back()" [disabled]="busy()">Back</button>
+        <button type="submit" [disabled]="busy()">
+          {{ busy() ? 'Creating…' : 'Create account' }}
+        </button>
+      </div>
+    </form>
+    } @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+    }
+    <p><a class="return-link" routerLink="/login">Back to sign in</a></p>
+  </section>
+</div>

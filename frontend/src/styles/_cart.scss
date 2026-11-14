@@ -1,0 +1,143 @@
+@use 'variables' as *;
+
+/* Cart and order totals */
+
+.cart {
+  padding: 23px;
+  background: $surface;
+
+  .cart-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid $line;
+    padding-bottom: 20px;
+
+    h2 {
+      font-family: Georgia, serif;
+      font-size: 1.8rem;
+      font-weight: 400;
+      margin: 4px 0 0;
+    }
+
+    .eyebrow {
+      font-size: 0.56rem;
+    }
+  }
+
+  .cart-count {
+    display: grid;
+    place-items: center;
+    width: 31px;
+    height: 31px;
+    background: $surface-active;
+    border-radius: 50%;
+    font-size: 0.78rem;
+  }
+
+  > .button {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  > p[role='status'] {
+    color: $muted;
+    font-size: 0.7rem;
+    margin-top: 16px;
+  }
+
+  .cart-note {
+    text-align: center;
+    color: $muted;
+    font-size: 0.6rem;
+    line-height: 1.8;
+    margin: 18px 0 0;
+  }
+
+  .total {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 22px 0;
+    font-size: 0.75rem;
+
+    span {
+      font-size: 1.25rem;
+    }
+  }
+}
+
+.empty-cart {
+  text-align: center;
+  padding: 28px 0 20px;
+
+  .basket-symbol {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 18px;
+    background: $surface-soft;
+    border-radius: 50%;
+    font-size: 3rem;
+    line-height: 1;
+    color: $accent;
+  }
+
+  p {
+    font-size: 0.82rem;
+    margin-bottom: 10px;
+  }
+
+  small {
+    color: $muted;
+    font-size: 0.68rem;
+    line-height: 1.8;
+  }
+}
+
+.cart-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0;
+  border-bottom: 1px solid $line;
+  font-size: 0.76rem;
+
+  strong {
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  > span:first-of-type {
+    font-size: 0.7rem;
+    color: $muted;
+  }
+
+  label {
+    font-size: 0.6rem;
+
+    input {
+      max-width: 76px;
+      min-height: 35px;
+      padding: 7px 10px;
+      font-size: 0.75rem;
+    }
+  }
+
+  button {
+    justify-self: start;
+    padding: 0;
+    min-height: 25px;
+    font-size: 0.6rem;
+    border: 0;
+    text-decoration: underline;
+    color: $primary;
+  }
+}
+
+.total {
+  font-weight: 650;
+  font-size: 1.3rem;
+}

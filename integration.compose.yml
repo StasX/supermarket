@@ -1,4 +1,10 @@
 services:
+  redis:
+    build:
+      context: .
+      dockerfile: redis/Dockerfile
+    tmpfs:
+      - /data:uid=999,gid=1000,mode=0700
   minio:
     build:
       context: .
@@ -20,9 +26,12 @@ services:
       dockerfile: integration_tests/Dockerfile
     environment:
       MONGODB_URI: mongodb://mongo:27017/shop_integration
+      REDIS_URL: redis://redis:6379
     env_file:
       - integration_tests/.env.integration
     depends_on:
+      redis:
+        condition: service_healthy
       mongo:
         condition: service_healthy
       minio:

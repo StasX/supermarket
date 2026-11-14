@@ -1,0 +1,173 @@
+@use 'variables' as *;
+
+/* Sign in and signup */
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  max-width: 1110px;
+  min-height: 675px;
+  margin: 16px auto 0;
+  overflow: hidden;
+  border: 1px solid $line;
+  border-radius: 20px;
+  background: $surface;
+  box-shadow: 0 12px 60px #3d521d05;
+
+  .auth-story {
+    position: relative;
+    overflow: hidden;
+    padding: 46px 48px 0;
+    background: $theme-gradient;
+
+    .eyebrow {
+      color: $muted;
+    }
+
+    h2 {
+      position: relative;
+      z-index: 1;
+      font-family: Georgia, serif;
+      font-size: clamp(2.8rem, 5vw, 4.5rem);
+      line-height: 1.06;
+      font-weight: 400;
+      margin: 24px 0 20px;
+    }
+
+    > p {
+      position: relative;
+      z-index: 1;
+      color: $muted;
+      font-size: 0.84rem;
+      line-height: 1.9;
+    }
+
+    .market-art {
+      display: block;
+      width: 94%;
+      margin: -45px 0 -20px 50px;
+      transform: rotate(-5deg);
+    }
+
+    .story-note {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+      padding: 16px 0 24px;
+      color: $muted;
+      font-size: 0.7rem;
+
+      > span:first-child {
+        color: $accent;
+        font-size: 1.6rem;
+      }
+    }
+  }
+
+  .auth-panel {
+    align-self: center;
+    padding: 45px 52px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+
+    h1 {
+      margin: 13px 0 14px;
+      font-size: 2.6rem;
+    }
+
+    .auth-subtitle {
+      color: $muted;
+      font-size: 0.82rem;
+      margin-bottom: 33px;
+    }
+
+    form > button {
+      margin-top: 5px;
+      min-height: 49px;
+    }
+
+    .auth-switch {
+      margin-top: 28px;
+      color: $muted;
+      font-size: 0.76rem;
+      text-align: center;
+
+      a {
+        font-weight: 600;
+        text-decoration: none;
+      }
+    }
+
+    .form-footnote {
+      border-top: 1px solid $line;
+      padding-top: 25px;
+      margin-top: 32px;
+      color: $muted;
+      text-align: center;
+      font-size: 0.68rem;
+
+      span {
+        margin-right: 7px;
+        color: $primary;
+      }
+    }
+  }
+
+  &.signup-layout {
+    .auth-story .market-art {
+      margin-top: 0;
+    }
+  }
+
+  @media (max-width: 780px) {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    max-width: 480px;
+
+    .auth-story {
+      display: none;
+    }
+
+    .auth-panel {
+      padding: 38px 28px;
+    }
+  }
+}
+
+.signup-progress {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0 8px;
+
+  > span {
+    color: $muted;
+    font-size: 0.8rem;
+    font-weight: 700;
+
+    span {
+      margin-left: 5px;
+      font-size: 0.66rem;
+      font-weight: 500;
+    }
+
+    &.current {
+      color: $primary;
+    }
+  }
+
+  i {
+    flex: 1;
+    height: 1px;
+    background: $line;
+  }
+}
+
+.step-label {
+  font-size: 0.65rem;
+  color: $muted;
+  margin-bottom: 25px;
+}

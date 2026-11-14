@@ -1,0 +1,56 @@
+<h2>{{ editing ? 'Edit product' : 'Add product' }}</h2>
+<form [formGroup]="form" (ngSubmit)="save()">
+  <label>Product name<input formControlName="name" required /></label>
+  <label
+    >Category<select formControlName="category">
+      @for (name of categories; track name) {
+        <option [value]="name">{{ name }}</option>
+      }
+    </select></label
+  >
+  <label
+    >Price<input formControlName="price" inputmode="decimal" placeholder="0.00" required
+  /></label>
+  <div class="image-upload-field">
+    <label for="product-image">Product image</label>
+    <div class="image-upload-control" [class.disabled]="saving()">
+      <input
+        id="product-image"
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        aria-describedby="product-image-hint"
+        (change)="selectImage($event)"
+        [disabled]="saving()"
+      />
+      <div class="image-upload-content">
+        @if (preview() || form.controls.image.value) {
+          <img [src]="preview() || form.controls.image.value" alt="Product image preview" />
+        } @else {
+          <span class="image-upload-placeholder" aria-hidden="true">+</span>
+        }
+        <span class="image-upload-description"
+          ><span class="image-upload-name">{{
+            fileName() || (form.controls.image.value ? 'Current image' : 'No image selected')
+          }}</span
+          ><span class="image-upload-action">{{
+            preview() || form.controls.image.value ? 'Change image' : 'Choose image'
+          }}</span></span
+        >
+      </div>
+    </div>
+  </div>
+  <p class="hint" id="product-image-hint">PNG, JPEG, or WebP, up to 5 MB.</p>
+  <p class="hint">Enter a price with two decimal places, such as 10.00.</p>
+  <div class="actions">
+    <button type="submit" [disabled]="saving()">Save product</button
+    ><button type="button" class="secondary" (click)="reset()" [disabled]="saving()">
+      New product
+    </button>
+  </div>
+</form>
+@if (error()) {
+  <p class="error" role="alert">{{ error() }}</p>
+}
+@if (saved()) {
+  <p role="status">Product saved.</p>
+}

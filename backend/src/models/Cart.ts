@@ -1,4 +1,4 @@
-import type { CartRecord } from '../contracts';
+import type { CartRecord } from '../types/contracts';
 import mongoose from 'mongoose';
 const Schema = mongoose.Schema;
 const cartSchema = new Schema<CartRecord>({

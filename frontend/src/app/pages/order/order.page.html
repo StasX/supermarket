@@ -1,0 +1,49 @@
+<section class="panel">
+  <div class="review-heading">
+    <span class="eyebrow">YOUR GOOD THINGS, ALL TOGETHER</span>
+    <label
+      >Find products<input
+        type="search"
+        placeholder="Enter a product name"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+        aria-controls="order-products"
+    /></label>
+  </div>
+  <h1>Review your order</h1>
+  @if (cart.busy()) {
+  <p role="status">Loading your cart…</p>
+  } @if (error()) {
+  <p class="error" role="alert">{{ error() }}</p>
+  } @if (cart.lines().length) {
+  <table id="order-products">
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Quantity</th>
+        <th>Price</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (item of highlightedLines(); track item.id) {
+      <tr>
+        <td>
+          @if (item.matched) {
+          <mark>{{ item.name }}</mark>
+          } @else { {{ item.name }} }
+        </td>
+        <td>{{ item.count }}</td>
+        <td>{{ item.price | currency: 'USD' }}</td>
+        <td>{{ item.price * item.count | currency: 'USD' }}</td>
+      </tr>
+      }
+    </tbody>
+  </table>
+  <p class="total">Total: {{ cart.total() | currency: 'USD' }}</p>
+  <a class="button" routerLink="/order/payment">Continue to checkout</a>
+  } @else {
+  <p>Your cart is empty.</p>
+  }
+  <p><a class="return-link" routerLink="/store">Continue shopping</a></p>
+</section>

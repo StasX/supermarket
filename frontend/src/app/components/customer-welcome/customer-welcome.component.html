@@ -1,0 +1,72 @@
+<h1>{{ heading() }}</h1>
+@if (loading()) {
+  <p role="status">Loading your shopping history…</p>
+} @else if (error()) {
+  <p class="error" role="alert">{{ error() }}</p>
+} @else {
+  @if (cart.id()) {
+    <h2>Your open cart</h2>
+    @if (cart.created()) {
+      <p>Created at {{ cart.created() | date: 'medium' }}.</p>
+    }
+    @if (cart.lines().length) {
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Quantity</th>
+            <th>Price</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of cart.lines(); track item.id) {
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.count }}</td>
+              <td>{{ item.price | currency: 'USD' }}</td>
+              <td>{{ item.price * item.count | currency: 'USD' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    } @else {
+      <p>Your cart is empty.</p>
+    }
+    <p class="total">Total: {{ cart.total() | currency: 'USD' }}</p>
+  } @else if (lastOrder(); as order) {
+    <h2>Your latest order</h2>
+    <p>Order {{ order._id }}</p>
+    @if (order.created_at) {
+      <p>Ordered {{ order.created_at | date: 'medium' }}.</p>
+    }
+    @if (order.products?.length) {
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Quantity</th>
+            <th>Price</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of order.products; track $index) {
+            <tr>
+              <td>{{ item.name || productName(item.id) }}</td>
+              <td>{{ item.count }}</td>
+              <td>{{ item.price | currency: 'USD' }}</td>
+              <td>{{ item.price * item.count | currency: 'USD' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+    @if (order.price !== undefined) {
+      <p class="total">Total: {{ order.price | currency: 'USD' }}</p>
+    }
+  } @else {
+    <p>Your next shopping trip starts here.</p>
+  }
+  <a class="button" routerLink="/store">{{ cart.id() ? 'Continue shopping' : 'Start shopping' }}</a>
+}

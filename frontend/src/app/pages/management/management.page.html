@@ -1,0 +1,77 @@
+<div class="page-heading">
+  <div>
+    <span class="eyebrow">BEHIND THE COUNTER</span>
+    <h1>Product manager</h1>
+    <p>Keep the shelves full of good things.</p>
+  </div>
+  <span class="workspace-badge">MARKET WORKSPACE</span>
+</div>
+<div class="shop-layout management-layout">
+  <section
+    app-product-editor
+    #editor
+    (productSaved)="load()"
+    [attr.inert]="deleting() ? '' : null"
+  ></section>
+  <section>
+    <form class="search" (ngSubmit)="load()">
+      <label>Find a product<input type="search" name="search" [(ngModel)]="search" /></label
+      ><button type="submit" [disabled]="loading()">Search</button>
+    </form>
+    <label
+      >Category<select [(ngModel)]="category" (ngModelChange)="load()">
+        <option value="">All products</option>
+        @for (name of categories; track name) {
+        <option [value]="name">{{ name }}</option>
+        }
+      </select></label
+    >
+    @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+    } @if (loading()) {
+    <p role="status">Loading products…</p>
+    } @if (deleted()) {
+    <p role="status">{{ deleted() }}</p>
+    }
+    <div class="products">
+      @for (product of products(); track product.id) {
+      <article
+        app-product-card
+        [product]="product"
+        mode="manage"
+        [disabled]="editor.saving() || deleting()"
+        (selected)="editor.edit($event)"
+        (deleteRequested)="requestDelete($event)"
+      ></article>
+      } @empty { @if (!loading()) {
+      <p>No products found.</p>
+      } }
+    </div>
+  </section>
+</div>
+<dialog
+  #deleteDialog
+  aria-labelledby="delete-product-title"
+  aria-describedby="delete-product-description"
+  (cancel)="cancelDelete($event)"
+>
+  <h2 id="delete-product-title">Delete product?</h2>
+  <p id="delete-product-description">Are you realy want to delete {{ pendingDelete()?.name }}?</p>
+  @if (error()) {
+  <p class="error" role="alert">{{ error() }}</p>
+  }
+  <div class="actions">
+    <button
+      type="button"
+      class="secondary"
+      (click)="cancelDelete()"
+      [disabled]="deleting()"
+      autofocus
+    >
+      No
+    </button>
+    <button type="button" (click)="confirmDelete()" [disabled]="deleting()">
+      {{ deleting() ? 'Deleting…' : 'Yes' }}
+    </button>
+  </div>
+</dialog>
