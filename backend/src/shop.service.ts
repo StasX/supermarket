@@ -16,6 +16,20 @@ const categories = ['Milk & Eggs', 'Vegetables & Fruits', 'Meet & Fish', 'Wine &
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
 
+function isValidPrice(value: unknown): boolean {
+  if (typeof value !== 'string' && typeof value !== 'number') return false;
+  const text = String(value);
+  const decimal = text.length - 3;
+  if (decimal < 1 || text[decimal] !== '.') return false;
+  for (let index = 0; index < text.length; index++) {
+    if (index === decimal) continue;
+    const digit = text.charCodeAt(index);
+    if (digit < 48 || digit > 57) return false;
+  }
+  // Prices must remain representable as safe integer cents at checkout.
+  return Number.isSafeInteger(Math.round(Number(text) * 100));
+}
+
 interface ProductRecord {
   _id: mongoose.Types.ObjectId;
   name: string;
@@ -73,7 +87,7 @@ export class ShopService {
       !body.name.length ||
       typeof body.category !== 'string' ||
       !categories.includes(body.category) ||
-      !/^\d+\.\d{2}$/.test(String(body.price)) ||
+      !isValidPrice(body.price) ||
       (edit && !isValidProductOrCartId(body.id))
     ) {
       return { success: false };

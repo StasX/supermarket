@@ -872,6 +872,49 @@ test('search accepts the frontend product field and escapes regex characters', a
   expect(expression.test('Juice 1L')).toBe(false);
 });
 
+test.each(['0.00', '10.99', '001.25', 10.99])('admin can save price %j', async (price) => {
+  const response = await api()
+    .post('/add-product')
+    .set('Cookie', cookie(admin))
+    .send({
+      name: 'Juice',
+      category: 'Wine & Drinks',
+      price,
+    })
+    .expect(200);
+  expect(response.body.success).toBe(true);
+  expect(models.products.create).toHaveBeenCalledWith(
+    expect.objectContaining({ price: Number(price) }),
+  );
+});
+
+test.each([
+  '',
+  '10',
+  '1.1',
+  '-1.00',
+  '1e2',
+  '1.00\n',
+  '1.2.00',
+  '١.٠٠',
+  null,
+  {},
+  '9'.repeat(10000) + '.00',
+  '9007199254740992.00',
+])('admin rejects invalid price %j without writing', async (price) => {
+  const response = await api()
+    .post('/add-product')
+    .set('Cookie', cookie(admin))
+    .send({
+      name: 'Juice',
+      category: 'Wine & Drinks',
+      price,
+    })
+    .expect(200);
+  expect(response.body.success).toBe(false);
+  expect(models.products.create).not.toHaveBeenCalled();
+});
+
 test('admin can add a valid product', async () => {
   const body = { name: 'Juice', category: 'Wine & Drinks', price: '10.00', image: 'juice.png' };
   expect(
