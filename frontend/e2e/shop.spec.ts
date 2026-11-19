@@ -10,13 +10,13 @@ test('administrator can upload a product image and retain it when editing', asyn
     price: 5.25,
     image: '/products/edam.png',
   };
-  await page.route('**/reconect', (route) =>
+  await page.route('**/api/auth/session', (route) =>
     route.fulfill({ json: { success: true, role: 1, user: 'admin', name: 'Shop Admin' } }),
   );
-  await page.route('**/get-all-products', (route) =>
+  await page.route('**/api/products', (route) =>
     route.fulfill({ json: { success: true, products: [product] } }),
   );
-  await page.route('**/upload-product-image', async (route) => {
+  await page.route('**/api/products/images', async (route) => {
     uploadCount++;
     expect(route.request().headers()['content-type']).toContain('multipart/form-data');
     expect(route.request().postDataBuffer()?.includes(Buffer.from('filename="edam.png"'))).toBe(
@@ -24,7 +24,7 @@ test('administrator can upload a product image and retain it when editing', asyn
     );
     await route.fulfill({ json: { success: true, image: '/products/new.png' } });
   });
-  for (const endpoint of ['add-product', 'edit-product']) {
+  for (const endpoint of ['api/products/create', 'api/products/update']) {
     await page.route(`**/${endpoint}`, async (route) => {
       const body = route.request().postDataJSON();
       expect(body.image).toBe('/products/new.png');
@@ -65,39 +65,39 @@ test('customer can shop, change quantities, reload, review, and sign out', async
   let cart: { id: string; count: number; price: number }[] = [];
   let exists = false;
   for (const path of [
-    'reconect',
-    'get-all-products',
-    'get-products-by-category',
-    'find-product',
-    'get-cart',
-    'create-cart',
-    'update-cart',
-    'checkout',
-    'logout',
+    'api/auth/session',
+    'api/products',
+    'api/products/by-category',
+    'api/products/search',
+    'api/carts/current',
+    'api/carts',
+    'api/carts/update',
+    'api/orders/checkout',
+    'api/auth/logout',
   ]) {
     await page.route(`**/${path}`, async (route) => {
       const body = route.request().postDataJSON();
       let result: object = { success: true };
-      if (path === 'reconect')
+      if (path === 'api/auth/session')
         result = {
           success: true,
           role: 0,
           user: 'u1',
-          name: { first_name: 'John', last_name: 'Smith' },
+          name: 'John Smith',
         };
-      if (['get-all-products', 'get-products-by-category', 'find-product'].includes(path))
+      if (['api/products', 'api/products/by-category', 'api/products/search'].includes(path))
         result = { success: true, products: [product] };
-      if (path === 'get-cart')
+      if (path === 'api/carts/current')
         result = {
           success: true,
-          ...(exists ? { cart: { id: 'c1', products: cart, created: '2026-01-01' } } : {}),
+          cart: exists ? { id: 'c1', products: cart, createdAt: '2026-01-01' } : null,
         };
-      if (path === 'create-cart' || path === 'update-cart') {
+      if (path === 'api/carts' || path === 'api/carts/update') {
         cart = body.products;
         exists = true;
-        result = { success: true, id: 'c1', date: '2026-01-01' };
+        result = { success: true, cart: { id: 'c1', products: cart, createdAt: '2026-01-01' } };
       }
-      if (path === 'checkout') {
+      if (path === 'api/orders/checkout') {
         expect(body.payment).toEqual({ method: 'credit_card', last4: '4242' });
         result = {
           success: true,
@@ -166,8 +166,8 @@ test('customer can shop, change quantities, reload, review, and sign out', async
 test('two-step signup validates confirmation and submits the existing API payload', async ({
   page,
 }) => {
-  await page.route('**/sign-up', (route) => route.fulfill({ json: { created: true } }));
-  await page.route('**/check-signup', (route) =>
+  await page.route('**/api/auth/signup', (route) => route.fulfill({ json: { success: true } }));
+  await page.route('**/api/auth/signup/availability', (route) =>
     route.fulfill({ json: { success: true, available: true } }),
   );
   await page.goto('/#/sign-up');
@@ -184,7 +184,7 @@ test('two-step signup validates confirmation and submits the existing API payloa
   await page.getByLabel('City').fill('תל אביב');
   await page.getByLabel('Street').fill('דרך בן-גוריון 10');
   const submitted = page.waitForRequest(
-    (request) => request.url().endsWith('/sign-up') && request.method() === 'POST',
+    (request) => request.url().endsWith('/api/auth/signup') && request.method() === 'POST',
   );
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
   expect((await submitted).postDataJSON()).toEqual({
@@ -208,7 +208,7 @@ test('live demo administrator can sign in, search products, reconnect and sign o
   await page.getByLabel('Email', { exact: true }).fill('j.smith@example.com');
   await page.getByLabel('Password', { exact: true }).fill('sec907@Ad0');
   const loginRequest = page.waitForRequest(
-    (request) => request.url().endsWith('/login') && request.method() === 'POST',
+    (request) => request.url().endsWith('/api/auth/login') && request.method() === 'POST',
   );
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   expect((await loginRequest).headers()['x-xsrf-token']).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/);
@@ -220,7 +220,9 @@ test('live demo administrator can sign in, search products, reconnect and sign o
   await expect(page.locator('.product').first()).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Product manager' })).toBeVisible();
-  const logoutRequest = page.waitForRequest((request) => request.url().endsWith('/logout'));
+  const logoutRequest = page.waitForRequest((request) =>
+    request.url().endsWith('/api/auth/logout'),
+  );
   await page.getByRole('button', { name: 'Sign out' }).click();
   const logout = await logoutRequest;
   expect(logout.method()).toBe('POST');
@@ -238,11 +240,11 @@ test('redesigned login and storefront fit desktop and mobile screens', async ({
   await expect(page.locator('header .brand-mark')).toHaveAttribute('src', 'assets/img/logo.png');
   await page.locator('header .brand-mark').evaluate((image: HTMLImageElement) => image.decode());
   await page.screenshot({ path: testInfo.outputPath('login-desktop.png'), fullPage: true });
-  await page.route('**/reconect', (route) =>
+  await page.route('**/api/auth/session', (route) =>
     route.fulfill({ json: { success: true, role: 0, user: 'u1', name: 'John Smith' } }),
   );
-  await page.route('**/get-cart', (route) => route.fulfill({ json: { success: true } }));
-  await page.route('**/get-all-products', (route) =>
+  await page.route('**/api/carts/current', (route) => route.fulfill({ json: { success: true } }));
+  await page.route('**/api/products', (route) =>
     route.fulfill({
       json: {
         success: true,
@@ -298,13 +300,13 @@ test('administrator confirms product deletion and can cancel without changing th
     { id: 'p1', name: 'Edam', category: 'Milk & Eggs', price: 5.25, image: '/products/edam.png' },
   ];
   let deletes = 0;
-  await page.route('**/reconect', (route) =>
+  await page.route('**/api/auth/session', (route) =>
     route.fulfill({ json: { success: true, role: 1, user: 'admin', name: 'Shop Admin' } }),
   );
-  await page.route('**/get-all-products', (route) =>
+  await page.route('**/api/products', (route) =>
     route.fulfill({ json: { success: true, products } }),
   );
-  await page.route('**/delete-product', async (route) => {
+  await page.route('**/api/products/delete', async (route) => {
     deletes++;
     expect(route.request().postDataJSON()).toEqual({ id: 'p1' });
     expect(route.request().headers()['x-xsrf-token']).toBeTruthy();
@@ -342,7 +344,7 @@ test('signup Continue blocks registered emails and IDs before asking for persona
   page,
 }) => {
   let reason = 'This email is already registered.';
-  await page.route('**/check-signup', async (route) => {
+  await page.route('**/api/auth/signup/availability', async (route) => {
     expect(route.request().postDataJSON()).toEqual({
       email: 'existing@example.com',
       id: '123456789',

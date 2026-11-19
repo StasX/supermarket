@@ -43,14 +43,10 @@ export class AuthService {
       .reconnect()
       .then((result) => {
         if (result.success && result.user && result.role !== undefined) {
-          const name =
-            typeof result.name === 'object'
-              ? `${result.name.first_name} ${result.name.last_name}`
-              : (result.name ?? '');
           this.user.set({
             user: result.user,
             role: result.role,
-            name,
+            name: result.name ?? '',
             address: result.address,
             isReturning: result.isReturning,
           });

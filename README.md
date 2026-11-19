@@ -164,7 +164,7 @@ The frontend uses Angular 22, TypeScript 6, standalone components, reactive form
 
 For frontend development, keep the Compose application running on port 3000 (or run a separately configured local backend) and run `npm --prefix frontend start` in another terminal. Open `http://localhost:4200`; the Angular development server proxies API calls to NestJS. Change `frontend/proxy.conf.json` if the backend uses a different port. The Docker backend issues Secure cookies because it runs in production mode; for development over HTTP outside localhost, use a local backend without `NODE_ENV=production`, or configure HTTPS. Run `npm run build` from the root to build both projects without starting them.
 
-Bundled catalog photos live in `backend/static/products` and remain public at `/products/<filename>.png`. Administrator uploads (PNG, JPEG, or WebP, up to 5 MB) are saved in the private MinIO `product-images` bucket. `POST /upload-product-image` returns `/products/uploads/<generated-filename>`; the backend streams these images without exposing MinIO credentials or requiring browser access to its API. The bucket is created automatically when `S3_CREATE_BUCKET=true`, as configured in `.env.example`. Image validation and administrator permissions are unchanged.
+Bundled catalog photos live in `backend/static/products` and remain public at `/products/<filename>.png`. Administrator uploads (PNG, JPEG, or WebP, up to 5 MB) are saved in the private MinIO `product-images` bucket. `POST /api/products/images` returns `/products/uploads/<generated-filename>`; the backend streams these images without exposing MinIO credentials or requiring browser access to its API. The bucket is created automatically when `S3_CREATE_BUCKET=true`, as configured in `.env.example`. Image validation and administrator permissions are unchanged.
 
 Both Compose files build MinIO from the pinned upstream `RELEASE.2025-09-07T16-13-09Z` source using `minio/Dockerfile`, avoiding the unavailable prebuilt image repositories. The first build downloads Go dependencies and compiles the server, so it takes longer; later local builds reuse Docker layers. The MinIO image includes its health check and runs as UID/GID 1000. Existing MinIO data volumes must be writable by this user.
 
@@ -174,7 +174,7 @@ For AWS S3, provision the bucket first, set `S3_BUCKET` and `AWS_REGION`, omit `
 
 Existing uploaded files are not automatically migrated or deleted. Keep the old `product_uploads` volume and locally uploaded files until migration is verified. Copy legacy files into the MinIO bucket using their generated filename as the object key. Existing `/products/uploads/<filename>` URLs then work unchanged. Older records using `/products/<generated-filename>` must be updated to `/products/uploads/<generated-filename>` after copying their images. Bundled catalog records need no changes. Do not run `docker compose down --volumes` if you need to preserve database, signing-key, Redis rate-limit, or MinIO data.
 
-The backend uses NestJS 12 with its Express HTTP adapter and TypeScript 7. It keeps CommonJS application output with NodeNext module resolution so Node.js can load NestJS 12's ESM packages. Routing belongs to `ApiController`, authentication to `AuthService` and `SessionGuard`, product catalog queries and line-item validation to `ProductsService`, cart operations to `CartsService`, and checkout/order queries to `CheckoutService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. Existing API paths, including `/sign-up` and `/reconect`, and the `SESSIONID` cookie remain supported. Existing JWT sessions remain accepted; new tokens contain the user ID, a returning-login flag, and standard timestamps. Checkout supports demo orders without real payment processing.
+The backend uses NestJS 12 with its Express HTTP adapter and TypeScript 7. It keeps CommonJS application output with NodeNext module resolution so Node.js can load NestJS 12's ESM packages. Routing is handled by the authentication, products, carts, and orders controllers, authentication to `AuthService` and `SessionGuard`, product catalog queries and line-item validation to `ProductsService`, cart operations to `CartsService`, and checkout/order queries to `CheckoutService`. `DatabaseModule` connects to MongoDB and injects models. The old Express routers and middleware have been removed. JSON API routes are grouped under `/api`. Authentication uses the `SESSIONID` cookie. Existing JWT sessions remain accepted; new tokens contain the user ID, a returning-login flag, and standard timestamps. Checkout supports demo orders without real payment processing.
 
 ## Docker
 
@@ -279,23 +279,23 @@ npm audit uses `--audit-level=moderate`: moderate, high, and critical findings f
 
 ## API reference
 
-API paths are relative to the backend origin (`http://localhost:3000` by default). `/csrf-token`, `/login`, `/check-signup`, `/sign-up`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
+API paths are relative to the backend origin (`http://localhost:3000` by default). `/api/auth/csrf-token`, `/api/auth/login`, `/api/auth/signup/availability`, `/api/auth/signup`, and uploaded product images at `/products/uploads/<filename>` are public; bundled product images are also public static files. Other API endpoints require the `SESSIONID` cookie set by login. Role `0` is a customer; role `1` is an administrator. Missing, invalid, or expired sessions and rejected login credentials return HTTP 401 with `{ "success": false }`. Authenticated users with the wrong role receive HTTP 403 with the same body, including administrators attempting customer-only checkout. Application-level validation failures also generally return HTTP 200; upload errors use HTTP error statuses.
 
 ### Products
 
 | Method | Path                        | Description               |
 | ------ | --------------------------- | ------------------------- |
-| POST   | `/add-product`              | Create a product.         |
-| POST   | `/edit-product`             | Edit a product.           |
-| POST   | `/delete-product`           | Delete a product (admin). |
-| POST   | `/upload-product-image`     | Upload a product image.   |
-| POST   | `/find-product`             | Find products by name.    |
-| GET    | `/get-all-products`         | Get all products.         |
-| POST   | `/get-products-by-category` | Get products by category. |
+| POST   | `/api/products/create`      | Create a product.         |
+| POST   | `/api/products/update`      | Edit a product.           |
+| POST   | `/api/products/delete`      | Delete a product (admin). |
+| POST   | `/api/products/images`      | Upload a product image.   |
+| POST   | `/api/products/search`      | Find products by name.    |
+| GET    | `/api/products`             | Get all products.         |
+| POST   | `/api/products/by-category` | Get products by category. |
 
 #### Create or edit a product
 
-`POST /add-product` and `POST /edit-product` require an administrator session. Both accept:
+`POST /api/products/create` and `POST /api/products/update` require an administrator session. Both accept:
 
 ```json
 {
@@ -314,19 +314,19 @@ Response:
 }
 ```
 
-For `/edit-product`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must be nonnegative, have exactly two decimal places, and fit within safe integer cents. Send prices as strings (for example, `"10.00"`) to preserve trailing zeros. Category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
+For `/api/products/update`, include an additional `id` field containing the product's MongoDB ObjectId. Prices must be nonnegative, have exactly two decimal places, and fit within safe integer cents. Send prices as strings (for example, `"10.00"`) to preserve trailing zeros. Category must be one of `Milk & Eggs`, `Vegetables & Fruits`, `Meet & Fish`, or `Wine & Drinks`.
 
 #### Delete a product
 
-`POST /delete-product` requires an administrator session and a valid CSRF token. Send `{ "id": "<product ObjectId>" }`. It returns `{ "success": true }` when a product is deleted, or `{ "success": false }` for an invalid or missing product. Customers receive HTTP 403. In the product manager, **Delete** opens a confirmation naming the product; **Yes** deletes it and refreshes the catalog, while **No** or Escape cancels. Saved orders and invoice snapshots are preserved. An open cart containing a deleted product must be updated before checkout.
+`POST /api/products/delete` requires an administrator session and a valid CSRF token. Send `{ "id": "<product ObjectId>" }`. It returns `{ "success": true }` when a product is deleted, or `{ "success": false }` for an invalid or missing product. Customers receive HTTP 403. In the product manager, **Delete** opens a confirmation naming the product; **Yes** deletes it and refreshes the catalog, while **No** or Escape cancels. Saved orders and invoice snapshots are preserved. An open cart containing a deleted product must be updated before checkout.
 
 #### Upload a product image
 
-`POST /upload-product-image` requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/uploads/<generated-filename>" }`. Use that URL as the product's `image` field.
+`POST /api/products/images` requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/uploads/<generated-filename>" }`. Use that URL as the product's `image` field.
 
 #### Find a product
 
-`POST /find-product`
+`POST /api/products/search`
 
 Request:
 
@@ -349,7 +349,7 @@ Response:
       "category": "Wine & Drinks",
       "price": 10,
       "image": "...",
-      "_id": "..."
+      "id": "..."
     }
   ]
 }
@@ -357,13 +357,13 @@ Response:
 
 #### Get all products
 
-`GET /get-all-products`
+`GET /api/products`
 
-No request parameters are needed. The response has the same `success` and `products` structure shown for `/find-product`, but each product uses `id` instead of `_id` and includes only `id`, `name`, `category`, `price`, and `image`.
+No request parameters are needed. The response uses the same product fields as the search and category endpoints.
 
 #### Get products by category
 
-`POST /get-products-by-category`
+`POST /api/products/by-category`
 
 Request:
 
@@ -373,21 +373,21 @@ Request:
 }
 ```
 
-The response has the same `success` and `products` structure shown for `/find-product`, with matching products in the array.
+The response has the same `success` and `products` structure shown for `/api/products/search`, with matching products in the array.
 
 ### Users and sessions
 
-| Method | Path            | Description                      |
-| ------ | --------------- | -------------------------------- |
-| POST   | `/login`        | Log in.                          |
-| POST   | `/logout`       | Log out (CSRF protected).        |
-| GET    | `/reconect`     | Reconnect a user session.        |
-| POST   | `/sign-up`      | Create a customer account.       |
-| POST   | `/check-signup` | Check email and ID availability. |
+| Method | Path                            | Description                      |
+| ------ | ------------------------------- | -------------------------------- |
+| POST   | `/api/auth/login`               | Log in.                          |
+| POST   | `/api/auth/logout`              | Log out (CSRF protected).        |
+| GET    | `/api/auth/session`             | Reconnect a user session.        |
+| POST   | `/api/auth/signup`              | Create a customer account.       |
+| POST   | `/api/auth/signup/availability` | Check email and ID availability. |
 
 #### Log in
 
-`POST /login`
+`POST /api/auth/login`
 
 Request:
 
@@ -415,9 +415,9 @@ The response's `user` field contains the user's `_id`; `address` contains the sa
 
 #### Log out
 
-`POST /logout`
+`POST /api/auth/logout`
 
-Send an empty JSON body with the CSRF header described below. `GET /logout` is no longer supported.
+Send an empty JSON body with the CSRF header described below.
 
 Response:
 
@@ -429,19 +429,19 @@ Response:
 
 #### Reconnect
 
-`GET /reconect`
+`GET /api/auth/session`
 
-No request parameters are needed. The response includes `success`, `role`, `user`, `address`, and `isReturning` as in `/login`, but `name` is an object containing `first_name` and `last_name`.
+No request parameters are needed. The response has the same profile fields as login, including the display name as a string.
 
 #### Check signup availability
 
-`POST /check-signup` accepts `{ "email": "buyer@example.com", "id": "123456789" }` with a valid CSRF token. It returns `success`, `available`, `emailExists`, `idExists`, and a `reason` when either value is already registered. It does not create an account or receive passwords.
+`POST /api/auth/signup/availability` accepts `{ "email": "buyer@example.com", "id": "123456789" }` with a valid CSRF token. It returns `success`, `available`, `emailExists`, `idExists`, and a `reason` when either value is already registered. It does not create an account or receive passwords.
 
 The signup **Continue** button checks this endpoint before showing personal details. Duplicate email or ID values keep the user on step one with a specific message. While checking, the button and account fields are locked; failed checks can be retried. Final signup checks both fields again, and MongoDB unique indexes reject concurrent duplicates. Backend startup waits for the user, cart, and order indexes; conflicting existing records must be resolved before startup can complete.
 
 #### Sign up
 
-`POST /sign-up`
+`POST /api/auth/signup`
 
 Request:
 
@@ -461,36 +461,27 @@ Response:
 
 ```json
 {
-  "created": true
+  "success": true
 }
 ```
 
-The ID must contain nine digits and the password must contain at least eight characters. Names and cities accept Unicode letters, combining marks, spaces, apostrophes, and hyphens, without requiring capitalization. Streets also accept numbers and common address punctuation (`.`, `,`, `/`, `#`). These fields are limited to 150 characters; empty or malformed values are rejected. The city field accepts typed values with suggestions. New accounts always receive customer role `0`. Failed signup returns `{ "created": false, "reason": "..." }`.
+The ID must contain nine digits and the password must contain at least eight characters. Names and cities accept Unicode letters, combining marks, spaces, apostrophes, and hyphens, without requiring capitalization. Streets also accept numbers and common address punctuation (`.`, `,`, `/`, `#`). These fields are limited to 150 characters; empty or malformed values are rejected. The city field accepts typed values with suggestions. New accounts always receive customer role `0`. Failed signup returns `{ "success": false, "reason": "..." }`.
 
 ### Statistics
 
-| Method | Path              | Description                 |
-| ------ | ----------------- | --------------------------- |
-| GET    | `/total-orders`   | Get the number of orders.   |
-| GET    | `/total-products` | Get the number of products. |
+| Method | Path                  | Description                 |
+| ------ | --------------------- | --------------------------- |
+| GET    | `/api/orders/count`   | Get the number of orders.   |
+| GET    | `/api/products/count` | Get the number of products. |
 
 Both endpoints require a customer session and take no request parameters.
 
-`GET /total-orders` response:
+Both endpoints use the same response shape:
 
 ```json
 {
   "success": true,
-  "ordersCount": 1
-}
-```
-
-`GET /total-products` response:
-
-```json
-{
-  "success": true,
-  "productsCount": 1
+  "count": 1
 }
 ```
 
@@ -498,12 +489,12 @@ Both endpoints require a customer session and take no request parameters.
 
 All of these endpoints require a customer session and operate on that customer's records.
 
-| Method | Path              | Request                                                         | Description                                         |
-| ------ | ----------------- | --------------------------------------------------------------- | --------------------------------------------------- |
-| POST   | `/create-cart`    | `{ "products": [{ "id": "<product-object-id>", "count": 1 }] }` | Create an open cart; rejects an existing open cart. |
-| POST   | `/update-cart`    | `{ "id": "<cart-object-id>", "products": [] }`                  | Replace the contents of the customer's open cart.   |
-| GET    | `/get-cart`       | None                                                            | Return the open cart, if present.                   |
-| GET    | `/get-last-order` | None                                                            | Return the most recent order, if present.           |
+| Method | Path                 | Request                                                         | Description                                         |
+| ------ | -------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| POST   | `/api/carts`         | `{ "products": [{ "id": "<product-object-id>", "count": 1 }] }` | Create an open cart; rejects an existing open cart. |
+| POST   | `/api/carts/update`  | `{ "id": "<cart-object-id>", "products": [] }`                  | Replace the contents of the customer's open cart.   |
+| GET    | `/api/carts/current` | None                                                            | Return the open cart, if present.                   |
+| GET    | `/api/orders/latest` | None                                                            | Return the most recent order, if present.           |
 
 Cart item IDs must identify existing products, quantities must be positive safe integers, and duplicate product IDs are rejected. Prices are taken from the database; client-supplied prices are ignored. An empty product array is allowed.
 
@@ -511,17 +502,17 @@ A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces 
 
 The customer welcome page shows the open cart (including an empty open cart), its contents, total, and creation date labeled **Created at**. Without an open cart, it shows the latest order when available and a **Start shopping** button. The welcome heading uses login history: signup marks a new account as not yet logged in, and the first successful login atomically marks it as logged in. Later logins show **Welcome back to Dragon shop** even without prior orders. The signed session retains its greeting across page reloads. Existing accounts and legacy sessions are treated as returning customers.
 
-Successful creation returns `success`, cart `id`, `date`, and normalized `products`; updating returns `success` and normalized `products`. Retrieval returns `{ "success": true, "cart": { "id": "...", "products": [], "created": "..." } }`, or `{ "success": true }` when no open cart exists. Order history returns `{ "success": true, "order": { ... } }`, omitting `order` when none exists. Customer-only `POST /checkout` places demo orders as described below.
+Cart creation, updates, and retrieval return `{ "success": true, "cart": { "id": "...", "products": [], "createdAt": "..." } }`. The current-cart endpoint returns `cart: null` when there is no open cart. Order history returns the latest order in the same shape as checkout, with `order: null` when no order exists. Older orders may omit fields that were unavailable when they were placed. Customer-only `POST /api/orders/checkout` places demo orders as described below.
 
 ## CSRF protection
 
-All API writes, including login, signup, product uploads, and checkout, require a signed double-submit CSRF token. First call public `GET /csrf-token` with the session cookie, if present. It returns `{ "success": true }` and sets a readable `XSRF-TOKEN` cookie with `Cache-Control: no-store`. Send that cookie along with an `X-XSRF-TOKEN` header containing the same value on each POST request. A cookie alone is insufficient. Tokens use the shared session-signing key and are bound to the current `SESSIONID`; each replica must use the same signing key.
+All API writes, including login, signup, product uploads, and checkout, require a signed double-submit CSRF token. First call public `GET /api/auth/csrf-token` with the session cookie, if present. It returns `{ "success": true }` and sets a readable `XSRF-TOKEN` cookie with `Cache-Control: no-store`. Send that cookie along with an `X-XSRF-TOKEN` header containing the same value on each POST request. A cookie alone is insufficient. Tokens use the shared session-signing key and are bound to the current `SESSIONID`; each replica must use the same signing key.
 
 Angular obtains the token before startup and its built-in HttpClient XSRF protection attaches the header to relative same-origin writes, including multipart uploads. Login replaces it with a session-bound token; POST logout expires the session and issues a fresh anonymous token so another login can work without reloading. Page reloads bootstrap a token for existing sessions. The session cookie remains HTTP-only; only the CSRF cookie is readable by JavaScript. Both cookies use `SameSite=Lax` and `Secure` in production.
 
 If a signup availability check or final signup receives a CSRF verification rejection, the frontend fetches a fresh token and retries that request once. A second rejection is shown to the user; retries do not bypass the server guards. Signup also reports rate-limit waits, connection failures, and temporary service unavailability.
 
-The API rejects `Sec-Fetch-Site: cross-site` writes and validates Origin (or Referer as a fallback). By default, the source host and port must match the request Host. If a reverse proxy rewrites Host, set `CSRF_TRUSTED_ORIGINS` to a comma-separated list of exact browser origins, such as `https://shop.example.com`; wildcards are not supported. Forwarded headers are not trusted. Clients without Origin/Referer must still supply valid cookie/header tokens. Rejected CSRF requests return HTTP 403 without performing the requested write. `GET /logout` has been replaced by CSRF-protected `POST /logout`.
+The API rejects `Sec-Fetch-Site: cross-site` writes and validates Origin (or Referer as a fallback). By default, the source host and port must match the request Host. If a reverse proxy rewrites Host, set `CSRF_TRUSTED_ORIGINS` to a comma-separated list of exact browser origins, such as `https://shop.example.com`; wildcards are not supported. Forwarded headers are not trusted. Clients without Origin/Referer must still supply valid cookie/header tokens. Rejected CSRF requests return HTTP 403 without performing the requested write.
 
 ## Authentication rate limits
 
@@ -531,7 +522,7 @@ Login allows 20 requests, signup allows 5 requests, and signup availability chec
 
 Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, street, today or a future shipping date, cardholder name, any 16-digit card number (spaces are allowed), a current or future expiry month (`MM/YY`), and any three-digit security code. Shipping city and street accept international text, apostrophes, and hyphens, with a 150-character limit each. No charge is made. The browser sends only the card number's last four digits; the full number, expiry, cardholder name, and security code are never sent to the backend or stored in the database.
 
-`POST /checkout` requires a customer session and accepts:
+`POST /api/orders/checkout` requires a customer session and accepts:
 
 ```json
 {
@@ -541,10 +532,10 @@ Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, st
 }
 ```
 
-Shipping dates are checked against the shop date in `Asia/Jerusalem`. The backend validates cart ownership and recalculates prices from the catalog, ignoring client totals. Success returns `{ "success": true, "order": { "id": "...", "total": 10.50, "products": [{ "id": "...", "name": "...", "count": 1, "price": 10.50 }], "invoiceUrl": "/orders/<order-id>/invoice", "shipping": { "city": "...", "street": "...", "date": "..." }, "payment": { "mode": "demo", "method": "credit_card", "last4": "4242" } } }`. Validation failures return `{ "success": false, "reason": "..." }`.
+Shipping dates are checked against the shop date in `Asia/Jerusalem`. The backend validates cart ownership and recalculates prices from the catalog, ignoring client totals. Success returns `{ "success": true, "order": { "id": "...", "total": 10.50, "createdAt": "...", "products": [{ "id": "...", "name": "...", "count": 1, "price": 10.50 }], "invoiceUrl": "/orders/<order-id>/invoice", "shipping": { "city": "...", "street": "...", "date": "..." }, "payment": { "mode": "demo", "method": "credit_card", "last4": "4242" } } }`. Validation failures return `{ "success": false, "reason": "..." }`.
 
 Checkout closes the cart and saves an immutable order snapshot in one atomic cart update. An order is then inserted with a unique partial index for demo orders by cart ID. Concurrent requests and retries reuse this snapshot and return the same order, including recovery after an interrupted order insert; an intervening cart edit prevents stale checkout. Only demo payment metadata is stored. Existing order records are retained. Real payments require a provider integration before this feature can charge cards.
 
-After saving the order, the backend generates its PDF invoice in the same green table style as the order review. Product names, quantities, and prices are captured in the checkout snapshot, so later catalog edits do not change the invoice. The PDF is stored privately in the configured S3/MinIO bucket (`S3_BUCKET`, default `product-images`) at `invoices/<order-id>.pdf`; MongoDB stores its key in the order's `invoiceKey` field. The existing MinIO data volume preserves invoice files. AWS deployments need read/write permission for this prefix as well as product images.
+The first authorized download generates the invoice in the same green table style as the order review. The PDF uses the saved product names, quantities, and prices from checkout. It is stored privately in the configured S3/MinIO bucket (`S3_BUCKET`, default `product-images`) at `invoices/<order-id>.pdf`. The existing MinIO data volume preserves invoice files. AWS deployments need read/write permission for this prefix as well as product images.
 
-Checkout returns `order.invoiceUrl`, pointing to `GET /orders/<order-id>/invoice`. The success page's **here** link downloads this saved PDF. The endpoint requires the owning customer's session and sends an `application/pdf` attachment with private, non-cacheable headers. Invoice objects cannot be fetched through the public product-image route. Conditional S3 creation preserves the original PDF during concurrent requests and retries. If invoice storage fails after the order is saved, retrying checkout reuses that order and completes invoice storage. Existing demo orders without an invoice generate and store one on their first authorized download; products from before name snapshots were added display as `Unavailable product`.
+Checkout returns `order.invoiceUrl`, pointing to `GET /orders/<order-id>/invoice`. The success page's **here** link downloads the PDF. The endpoint requires the owning customer's session and sends an `application/pdf` attachment with private, non-cacheable headers. Conditional S3 creation preserves the original PDF during concurrent requests and retries. If invoice storage fails, the customer can retry the download independently of checkout. Products from before name snapshots were added display as `Unavailable product`.

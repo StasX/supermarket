@@ -48,7 +48,7 @@ export interface CartItem {
   price: number;
   name?: string;
 }
-export interface OrderRecord {
+export interface OrderSnapshot {
   user_id: number;
   username: string;
   cart_id: string;
@@ -56,13 +56,12 @@ export interface OrderRecord {
   shipping: { city: string; street: string; date: Date };
   created_at: Date;
   products: CartItem[];
-  invoiceKey?: string;
   payment: { mode: string; method: string; last4: string };
 }
 export interface CartRecord {
   user_id: number;
   products: CartItem[];
   created_at: Date;
-  checkout?: OrderRecord;
+  checkout?: OrderSnapshot;
   status: number;
 }

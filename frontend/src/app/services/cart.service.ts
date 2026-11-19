@@ -30,7 +30,7 @@ export class CartService {
       this.catalog.set(products);
       this.id.set(result.cart?.id ?? null);
       this.items.set(result.cart?.products ?? []);
-      this.created.set(result.cart?.created ?? '');
+      this.created.set(result.cart?.createdAt ?? '');
     } finally {
       this.busy.set(false);
     }
@@ -65,22 +65,13 @@ export class CartService {
     this.busy.set(true);
     try {
       const id = this.id();
-      if (id) {
-        const result = await this.api.updateCart(id, items);
-        if (!result.success) {
-          throw new Error('Cart was not saved. Please try again.');
-        }
-        items = result.products ?? items;
-      } else {
-        const result = await this.api.createCart(items);
-        if (!result.success || !result.id) {
-          throw new Error('Cart was not saved. Please try again.');
-        }
-        this.id.set(result.id);
-        this.created.set(result.date ?? '');
-        items = result.products ?? items;
+      const result = id ? await this.api.updateCart(id, items) : await this.api.createCart(items);
+      if (!result.success || !result.cart) {
+        throw new Error('Cart was not saved. Please try again.');
       }
-      this.items.set(items);
+      this.id.set(result.cart.id);
+      this.created.set(result.cart.createdAt);
+      this.items.set(result.cart.products);
     } finally {
       this.busy.set(false);
     }

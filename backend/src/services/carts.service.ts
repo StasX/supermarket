@@ -1,4 +1,4 @@
-import { CartInput, UserRecord } from '../types/contracts';
+import { CartInput, CartRecord, UserRecord } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
@@ -6,6 +6,10 @@ import { ProductsService } from './products.service';
 
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
+
+function cartResponse(cart: Pick<CartRecord, 'products' | 'created_at'> & { _id: unknown }) {
+  return { id: cart._id, products: cart.products, createdAt: cart.created_at };
+}
 
 @Injectable()
 export class CartsService {
@@ -28,7 +32,7 @@ export class CartsService {
         products,
         created_at: new Date(),
       });
-      return { success: true, id: cart._id, date: cart.created_at, products };
+      return { success: true, cart: cartResponse(cart) };
     } catch (error) {
       if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
         return { success: false };
@@ -48,14 +52,13 @@ export class CartsService {
     const cart = await this.models.carts.findOneAndUpdate(
       { _id: body.id, user_id: user.id, status: 1 },
       { $set: { products } },
+      { returnDocument: 'after', runValidators: true },
     );
-    return cart ? { success: true, products } : { success: false };
+    return cart ? { success: true, cart: cartResponse(cart) } : { success: false };
   }
 
   async cart(user: Pick<UserRecord, 'id' | 'username'>) {
     const cart = await this.models.carts.findOne({ user_id: user.id, status: 1 });
-    return cart
-      ? { success: true, cart: { id: cart._id, products: cart.products, created: cart.created_at } }
-      : { success: true };
+    return { success: true, cart: cart ? cartResponse(cart) : null };
   }
 }

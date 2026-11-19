@@ -1,35 +1,44 @@
-import type { UserRecord } from '../types/contracts';
 import mongoose from 'mongoose';
-const Schema = mongoose.Schema;
-const User = new Schema<UserRecord>({
-  id: {
-    type: Number,
-    unique: true,
-  },
-  name: {
-    first_name: String,
-    last_name: String,
-  },
-  username: {
-    type: String,
-    unique: true,
-    required: true,
-    trim: true,
-  },
+import type { UserRecord } from '../types/contracts';
 
-  password: {
-    type: String,
-    required: true,
+const CUSTOMER = 0;
+const ADMIN = 1;
+
+const userSchema = new mongoose.Schema<UserRecord>(
+  {
+    id: {
+      type: Number,
+      required: true,
+      unique: true,
+      min: 0,
+      max: 999999999,
+      validate: Number.isSafeInteger,
+    },
+    name: {
+      first_name: { type: String, required: true, maxlength: 150 },
+      last_name: { type: String, required: true, maxlength: 150 },
+    },
+    username: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+    password: { type: String, required: true },
+    address: {
+      city: { type: String, required: true, maxlength: 150 },
+      street: { type: String, required: true, maxlength: 150 },
+    },
+    // Existing accounts are returning customers; signup marks new accounts explicitly.
+    has_logged_in: { type: Boolean, required: true, default: true },
+    role: {
+      type: Number,
+      required: true,
+      enum: [CUSTOMER, ADMIN],
+      default: CUSTOMER,
+    },
   },
-  address: {
-    city: String,
-    street: String,
-  },
-  // Existing accounts are returning customers; signup marks new accounts explicitly.
-  has_logged_in: { type: Boolean, default: true },
-  role: {
-    type: Number,
-    default: 0 /* 0: regular user, 1: administrator */,
-  },
-});
-export = mongoose.model('users', User);
+  { strict: 'throw' },
+);
+
+export = mongoose.model('users', userSchema);

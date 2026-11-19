@@ -2,8 +2,8 @@ import { CategoryInput, SearchInput, ProductInput, record } from '../types/contr
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
+import { productCategories } from '../config/product-categories';
 
-const categories = ['Milk & Eggs', 'Vegetables & Fruits', 'Meet & Fish', 'Wine & Drinks'];
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
 
@@ -25,8 +25,12 @@ interface ProductRecord {
   _id: mongoose.Types.ObjectId;
   name: string;
   price: number;
-  image: string;
+  image?: string | null;
   category: string;
+}
+
+function productResponse({ _id, name, price, image, category }: ProductRecord) {
+  return { id: _id, name, price, image: image ?? '', category };
 }
 
 @Injectable()
@@ -37,23 +41,17 @@ export class ProductsService {
     const products: ProductRecord[] = await this.models.products.find({});
     return {
       success: true,
-      products: products.map((product) => ({
-        id: product._id,
-        name: product.name,
-        price: product.price,
-        image: product.image,
-        category: product.category,
-      })),
+      products: products.map(productResponse),
     };
   }
 
   async category(body: CategoryInput) {
-    if (typeof body.category !== 'string' || !categories.includes(body.category)) {
+    if (typeof body.category !== 'string' || !productCategories.includes(body.category)) {
       return { success: false };
     }
     return {
       success: true,
-      products: await this.models.products.find({ category: body.category }),
+      products: (await this.models.products.find({ category: body.category })).map(productResponse),
     };
   }
 
@@ -65,7 +63,9 @@ export class ProductsService {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return {
       success: true,
-      products: await this.models.products.find({ name: new RegExp(escaped, 'i') }),
+      products: (await this.models.products.find({ name: new RegExp(escaped, 'i') })).map(
+        productResponse,
+      ),
     };
   }
 
@@ -74,7 +74,7 @@ export class ProductsService {
       typeof body.name !== 'string' ||
       !body.name.length ||
       typeof body.category !== 'string' ||
-      !categories.includes(body.category) ||
+      !productCategories.includes(body.category) ||
       !isValidPrice(body.price) ||
       (edit && !isValidProductOrCartId(body.id))
     ) {
@@ -88,7 +88,11 @@ export class ProductsService {
     };
     try {
       if (edit) {
-        const updated = await this.models.products.findByIdAndUpdate(body.id, { $set: product });
+        const updated = await this.models.products.findByIdAndUpdate(
+          body.id,
+          { $set: product },
+          { runValidators: true },
+        );
         return { success: Boolean(updated) };
       }
       await this.models.products.create(product);
@@ -108,7 +112,7 @@ export class ProductsService {
   }
 
   async count() {
-    return { success: true, productsCount: await this.models.products.countDocuments({}) };
+    return { success: true, count: await this.models.products.countDocuments({}) };
   }
 
   async resolveCartProducts(input: unknown, includeNames = false) {

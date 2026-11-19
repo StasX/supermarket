@@ -21,15 +21,17 @@ export class ApiService {
   private readonly http = inject(HttpClient);
 
   login(username: string, password: string) {
-    return firstValueFrom(this.http.post<Result & Partial<User>>('/login', { username, password }));
+    return firstValueFrom(
+      this.http.post<Result & Partial<User>>('/api/auth/login', { username, password }),
+    );
   }
 
   checkSignup(body: Pick<Signup, 'email' | 'id'>) {
-    return this.signupRequest<SignupAvailability>('/check-signup', body);
+    return this.signupRequest<SignupAvailability>('/api/auth/signup/availability', body);
   }
 
   signup(body: Signup) {
-    return this.signupRequest<{ created: boolean; reason?: string }>('/sign-up', body);
+    return this.signupRequest<Result & { reason?: string }>('/api/auth/signup', body);
   }
 
   private async signupRequest<T>(url: string, body: unknown): Promise<T> {
@@ -46,53 +48,39 @@ export class ApiService {
       }
       // A stale token can remain in an open tab after the session or signing key changes.
       // The guard rejects the original request before signup performs any writes.
-      await firstValueFrom(this.http.get('/csrf-token'));
+      await firstValueFrom(this.http.get('/api/auth/csrf-token'));
       return send();
     }
   }
 
   reconnect() {
-    return firstValueFrom(
-      this.http.get<
-        Result & {
-          role?: number;
-          user?: string;
-          isReturning?: boolean;
-          name?: string | { first_name: string; last_name: string };
-          address?: User['address'];
-        }
-      >('/reconect'),
-    );
+    return firstValueFrom(this.http.get<Result & Partial<User>>('/api/auth/session'));
   }
 
   logout() {
-    return firstValueFrom(this.http.post<Result>('/logout', {}));
+    return firstValueFrom(this.http.post<Result>('/api/auth/logout', {}));
   }
 
   async products(category = '', search = '') {
     const searchTerm = search.trim();
     let request;
     if (searchTerm) {
-      request = this.http.post<ProductResult>('/find-product', { product: searchTerm });
+      request = this.http.post<ProductResult>('/api/products/search', { product: searchTerm });
     } else if (category) {
-      request = this.http.post<ProductResult>('/get-products-by-category', { category });
+      request = this.http.post<ProductResult>('/api/products/by-category', { category });
     } else {
-      request = this.http.get<ProductResult>('/get-all-products');
+      request = this.http.get<ProductResult>('/api/products');
     }
     const result = await firstValueFrom(request);
     if (!result.success) {
       throw new Error('Unable to load products. Please sign in again.');
     }
-    return result.products.map((product) => ({
-      ...product,
-      id: product.id || product._id!,
-      price: Number(product.price),
-    }));
+    return result.products;
   }
 
   saveProduct(product: Omit<Product, 'id'> & { id?: string }) {
     return firstValueFrom(
-      this.http.post<Result>(product.id ? '/edit-product' : '/add-product', {
+      this.http.post<Result>(product.id ? '/api/products/update' : '/api/products/create', {
         ...product,
         price: Number(product.price).toFixed(2),
       }),
@@ -100,49 +88,47 @@ export class ApiService {
   }
 
   deleteProduct(id: string) {
-    return firstValueFrom(this.http.post<Result>('/delete-product', { id }));
+    return firstValueFrom(this.http.post<Result>('/api/products/delete', { id }));
   }
 
   uploadProductImage(file: File) {
     const body = new FormData();
     body.append('image', file);
     return firstValueFrom(
-      this.http.post<Result & { image?: string }>('/upload-product-image', body),
+      this.http.post<Result & { image?: string }>('/api/products/images', body),
     );
   }
 
   cart() {
-    return firstValueFrom(this.http.get<Result & { cart?: Cart }>('/get-cart'));
+    return firstValueFrom(this.http.get<Result & { cart: Cart | null }>('/api/carts/current'));
   }
 
   lastOrder() {
-    return firstValueFrom(this.http.get<Result & { order?: OrderHistory }>('/get-last-order'));
+    return firstValueFrom(
+      this.http.get<Result & { order: OrderHistory | null }>('/api/orders/latest'),
+    );
   }
 
   checkout(body: CheckoutRequest) {
     return firstValueFrom(
-      this.http.post<Result & { reason?: string; order?: CheckoutOrder }>('/checkout', body),
-    );
-  }
-
-  createCart(products: CartItem[]) {
-    return firstValueFrom(
-      this.http.post<Result & { id?: string; date?: string; products?: CartItem[] }>(
-        '/create-cart',
-        { products },
+      this.http.post<Result & { reason?: string; order?: CheckoutOrder }>(
+        '/api/orders/checkout',
+        body,
       ),
     );
   }
 
+  createCart(products: CartItem[]) {
+    return firstValueFrom(this.http.post<Result & { cart?: Cart }>('/api/carts', { products }));
+  }
+
   updateCart(id: string, products: CartItem[]) {
     return firstValueFrom(
-      this.http.post<Result & { products?: CartItem[] }>('/update-cart', { id, products }),
+      this.http.post<Result & { cart?: Cart }>('/api/carts/update', { id, products }),
     );
   }
 
   count(type: 'orders' | 'products') {
-    return firstValueFrom(
-      this.http.get<Result & { ordersCount?: number; productsCount?: number }>(`/total-${type}`),
-    );
+    return firstValueFrom(this.http.get<Result & { count: number }>(`/api/${type}/count`));
   }
 }

@@ -2,7 +2,10 @@ import { Module } from '@nestjs/common';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'node:path';
 import { DatabaseModule } from './database.module';
-import { ApiController } from '../controllers/api.controller';
+import { AuthController } from '../controllers/auth.controller';
+import { CartsController } from '../controllers/carts.controller';
+import { OrdersController } from '../controllers/orders.controller';
+import { ProductsController } from '../controllers/products.controller';
 import { AuthService } from '../services/auth.service';
 import { ProductsService } from '../services/products.service';
 import { CartsService } from '../services/carts.service';
@@ -32,7 +35,7 @@ import { CsrfGuard } from '../guards/csrf.guard';
       },
     ),
   ],
-  controllers: [ApiController],
+  controllers: [AuthController, CartsController, OrdersController, ProductsController],
   providers: [
     CsrfService,
     CsrfGuard,

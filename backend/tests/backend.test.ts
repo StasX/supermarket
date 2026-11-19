@@ -34,6 +34,11 @@ const rateStore = {
 };
 let authRateLimiter = new AuthRateLimitGuard(rateStore);
 const { MODELS } = require('../dist/modules/database.module');
+const Cart = require('../dist/models/Cart');
+const Order = require('../dist/models/Order');
+const Product = require('../dist/models/Product');
+const RevokedSession = require('../dist/models/RevokedSession');
+const User = require('../dist/models/User');
 const { ImageStorageService } = require('../dist/services/image-storage.service');
 const { createInvoice } = require('../dist/utils/invoice');
 const { CsrfService } = require('../dist/services/csrf.service');
@@ -162,7 +167,7 @@ describe('CSRF protection', () => {
   };
 
   test('bootstrap issues a readable, non-cacheable token for anonymous clients', async () => {
-    const response = await raw().get('/csrf-token').expect(200);
+    const response = await raw().get('/api/auth/csrf-token').expect(200);
     const tokenCookie = response.headers['set-cookie'][0];
     expect(tokenCookie).toContain('XSRF-TOKEN=');
     expect(tokenCookie).not.toContain('HttpOnly');
@@ -171,7 +176,7 @@ describe('CSRF protection', () => {
     expect(new CsrfService().valid(token)).toBe(true);
   });
 
-  test.each(['/login', '/sign-up', '/check-signup'])(
+  test.each(['/api/auth/login', '/api/auth/signup', '/api/auth/signup/availability'])(
     'public form %s rejects missing CSRF credentials',
     async (route) => {
       await raw().post(route).send({}).expect(403);
@@ -208,13 +213,13 @@ describe('CSRF protection', () => {
     if (invalid === 'bad-origin') headers['Origin'] = 'https://evil.example';
     if (invalid === 'null-origin') headers['Origin'] = 'null';
     if (invalid === 'bad-referer') headers['Referer'] = 'https://evil.example/page';
-    await raw().post('/create-cart').set(headers).send({ products: [] }).expect(403);
+    await raw().post('/api/carts').set(headers).send({ products: [] }).expect(403);
     expect(models.carts.create).not.toHaveBeenCalled();
   });
 
   test('same-origin requests with valid tokens reach the handler', async () => {
     await raw()
-      .post('/sign-up')
+      .post('/api/auth/signup')
       .set('Host', 'shop.example')
       .set('Origin', 'https://shop.example')
       .set(credentials())
@@ -227,19 +232,19 @@ describe('CSRF protection', () => {
     process.env['CSRF_TRUSTED_ORIGINS'] = 'https://shop.example';
     try {
       await raw()
-        .post('/sign-up')
+        .post('/api/auth/signup')
         .set('Origin', 'https://shop.example')
         .set(credentials())
         .send({})
         .expect(200);
       await raw()
-        .post('/sign-up')
+        .post('/api/auth/signup')
         .set('Origin', 'https://shop.example.evil.test')
         .set(credentials())
         .send({})
         .expect(403);
       await raw()
-        .post('/sign-up')
+        .post('/api/auth/signup')
         .set('Origin', 'http://shop.example')
         .set(credentials())
         .send({})
@@ -253,7 +258,7 @@ describe('CSRF protection', () => {
   test('bootstrap binds tokens to an existing session and replicas validate the same signature', async () => {
     const session = cookie().slice('SESSIONID='.length);
     const response = await raw()
-      .get('/csrf-token')
+      .get('/api/auth/csrf-token')
       .set('Cookie', `SESSIONID=${session}`)
       .expect(200);
     const token = response.headers['set-cookie'][0].split(';')[0].slice('XSRF-TOKEN='.length);
@@ -270,7 +275,7 @@ describe('CSRF protection', () => {
     });
     const anonymous = credentials();
     const login = await raw()
-      .post('/login')
+      .post('/api/auth/login')
       .set(anonymous)
       .send({ username: customer.username, password: 'password123' })
       .expect(200);
@@ -278,12 +283,12 @@ describe('CSRF protection', () => {
     const session = cookies.find((value: string) => value.startsWith('SESSIONID='));
     const xsrf = cookies.find((value: string) => value.startsWith('XSRF-TOKEN='));
     await raw()
-      .post('/logout')
+      .post('/api/auth/logout')
       .set('Cookie', `${session}; ${anonymous.Cookie}`)
       .set('X-XSRF-TOKEN', anonymous['X-XSRF-TOKEN'])
       .expect(403);
     const logout = await raw()
-      .post('/logout')
+      .post('/api/auth/logout')
       .set('Cookie', `${session}; ${xsrf}`)
       .set('X-XSRF-TOKEN', xsrf.slice('XSRF-TOKEN='.length))
       .expect(200);
@@ -292,12 +297,12 @@ describe('CSRF protection', () => {
       .split(';')[0]
       .slice('XSRF-TOKEN='.length);
     expect(new CsrfService().valid(nextToken)).toBe(true);
-    await raw().get('/logout').set('Cookie', session).expect(404);
+    await raw().get('/api/auth/logout').set('Cookie', session).expect(404);
   });
 });
 
 test.each([null, admin])('checkout requires a customer session (%s)', async (user) => {
-  const call = api().post('/checkout');
+  const call = api().post('/api/orders/checkout');
   if (user) call.set('Cookie', cookie(user));
   expect((await call.send(checkoutBody).expect(user ? 403 : 401)).body.success).toBe(false);
 });
@@ -309,9 +314,9 @@ test.each([
   { ...checkoutBody, payment: { method: 'credit_card', last4: '123' } },
   { ...checkoutBody, payment: { ...checkoutBody.payment, number: '4242424242424242', cvc: '123' } },
 ])('checkout rejects invalid shipping or payment data (%j)', async (body) => {
-  expect((await api().post('/checkout').set('Cookie', cookie()).send(body)).body.success).toBe(
-    false,
-  );
+  expect(
+    (await api().post('/api/orders/checkout').set('Cookie', cookie()).send(body)).body.success,
+  ).toBe(false);
   expect(models.carts.findOne).not.toHaveBeenCalled();
 });
 
@@ -334,7 +339,7 @@ test.each([
       ...update.$setOnInsert,
     }));
     const response = await api()
-      .post('/checkout')
+      .post('/api/orders/checkout')
       .set('Cookie', cookie())
       .send({
         ...checkoutBody,
@@ -351,10 +356,7 @@ test.each([
     expect(response.body.order.shipping).toMatchObject({ city, street });
     expect(saved.products).toEqual([{ id: admin._id, name: 'Apple juice', count: 2, price: 5.25 }]);
     expect(response.body.order.invoiceUrl).toBe('/orders/order1/invoice');
-    const invoice = images.get('invoices/order1.pdf')!;
-    expect(invoice.toString()).toMatch(/^%PDF-/);
-    expect(invoice.toString()).toContain('Apple juice');
-    expect(invoice.toString()).toContain('$5.25');
+    expect(invoiceWrite).not.toHaveBeenCalled();
     expect(saved).not.toHaveProperty('credit_card');
     expect(saved.payment).toEqual({ mode: 'demo', method: 'credit_card', last4 });
     expect(models.carts.findOneAndUpdate.mock.calls[0][0]).toMatchObject({
@@ -369,12 +371,14 @@ test.each([
 test('checkout rejects another customer cart or an empty cart', async () => {
   models.carts.findOne.mockResolvedValue(null);
   expect(
-    (await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody)).body.success,
+    (await api().post('/api/orders/checkout').set('Cookie', cookie()).send(checkoutBody)).body
+      .success,
   ).toBe(false);
   expect(models.carts.findOne).toHaveBeenCalledWith({ _id: customer._id, user_id: customer.id });
   models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products: [] });
   expect(
-    (await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody)).body.success,
+    (await api().post('/api/orders/checkout').set('Cookie', cookie()).send(checkoutBody)).body
+      .success,
   ).toBe(false);
   expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
 });
@@ -388,126 +392,93 @@ test('checkout retries a closed cart using its original snapshot', async () => {
   };
   models.carts.findOne.mockResolvedValue({ status: 0, checkout: snapshot });
   models.orders.findOneAndUpdate.mockResolvedValue({ _id: 'order1', ...snapshot });
-  const response = await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody);
+  const response = await api()
+    .post('/api/orders/checkout')
+    .set('Cookie', cookie())
+    .send(checkoutBody);
   expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 12 } });
   expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
   expect(models.orders.findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: snapshot });
 });
 
-test.each([
-  'after cart closure',
-  'before order insert',
-  'after order insert',
-  'before invoice upload',
-  'after invoice upload',
-  'before invoice marker update',
-])('checkout recovers from an interruption %s', async (failurePoint) => {
-  // Keep durable state separate from returned documents to model a lost response
-  // after a successful write, as well as failures before the next write starts.
-  let cart: any = {
-    _id: customer._id,
-    user_id: customer.id,
-    status: 1,
-    products: [{ id: admin._id, count: 2, price: 0.01 }],
-  };
-  let order: any;
-  let interrupted = false;
-  let orderCreates = 0;
-  let invoiceCreates = 0;
-  const invoiceKey = `invoices/${customer._id}.pdf`;
-  const interrupt = (point: string) => {
-    if (!interrupted && point === failurePoint) {
-      interrupted = true;
-      throw new Error(`Injected interruption ${point}`);
-    }
-  };
-  models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Original juice', price: 5.25 }]);
-  models.carts.findOne.mockImplementation(async () => structuredClone(cart));
-  models.carts.findOneAndUpdate.mockImplementation(async (_query, update) => {
-    cart = { ...cart, ...structuredClone(update.$set) };
-    interrupt('after cart closure');
-    return structuredClone(cart);
-  });
-  models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => {
-    if (update.$setOnInsert) {
+test.each(['after cart closure', 'before order insert', 'after order insert'])(
+  'checkout recovers from an interruption %s',
+  async (failurePoint) => {
+    // Keep durable state separate from returned documents to model a lost response
+    // after a successful write, as well as failures before the next write starts.
+    let cart: any = {
+      _id: customer._id,
+      user_id: customer.id,
+      status: 1,
+      products: [{ id: admin._id, count: 2, price: 0.01 }],
+    };
+    let order: any;
+    let interrupted = false;
+    let orderCreates = 0;
+    const interrupt = (point: string) => {
+      if (!interrupted && point === failurePoint) {
+        interrupted = true;
+        throw new Error(`Injected interruption ${point}`);
+      }
+    };
+    models.products.find.mockResolvedValue([
+      { _id: admin._id, name: 'Original juice', price: 5.25 },
+    ]);
+    models.carts.findOne.mockImplementation(async () => structuredClone(cart));
+    models.carts.findOneAndUpdate.mockImplementation(async (_query, update) => {
+      cart = { ...cart, ...structuredClone(update.$set) };
+      interrupt('after cart closure');
+      return structuredClone(cart);
+    });
+    models.orders.findOneAndUpdate.mockImplementation(async (_query, update) => {
       interrupt('before order insert');
       if (!order) {
         order = { _id: customer._id, ...structuredClone(update.$setOnInsert) };
         orderCreates++;
       }
       interrupt('after order insert');
-    } else {
-      interrupt('before invoice marker update');
-      Object.assign(order, update.$set);
-    }
-    return structuredClone(order);
-  });
-  invoiceWrite.mockImplementation(async (_id: string, bytes: Buffer) => {
-    interrupt('before invoice upload');
-    if (!images.has(invoiceKey)) {
-      images.set(invoiceKey, Buffer.from(bytes));
-      invoiceCreates++;
-    }
-    interrupt('after invoice upload');
-  });
-
-  await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody).expect(500);
-  expect(interrupted).toBe(true);
-  expect(cart.status).toBe(0);
-  expect(cart.checkout.price).toBe(10.5);
-  const frozenSnapshot = structuredClone(cart.checkout);
-  const originalInvoice = images.get(invoiceKey);
-  if (['after cart closure', 'before order insert'].includes(failurePoint)) {
-    expect(order).toBeUndefined();
-    expect(invoiceWrite).not.toHaveBeenCalled();
-  } else {
-    expect(orderCreates).toBe(1);
-    expect(order.invoiceKey).toBeUndefined();
-  }
-  if (['after invoice upload', 'before invoice marker update'].includes(failurePoint)) {
-    expect(originalInvoice).toBeDefined();
-  } else {
-    expect(originalInvoice).toBeUndefined();
-  }
-
-  // Neither later catalog edits nor a changed retry payload may change a closed
-  // cart's snapshot. Repeating checkout must recover the existing order/PDF.
-  models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Changed juice', price: 99 }]);
-  const retryBody = {
-    ...checkoutBody,
-    shipping: { ...checkoutBody.shipping, street: 'Changed street' },
-    payment: { method: 'credit_card', last4: '9999' },
-  };
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await api()
-      .post('/checkout')
-      .set('Cookie', cookie())
-      .send(retryBody)
-      .expect(200);
-    expect(response.body).toMatchObject({
-      success: true,
-      order: {
-        id: customer._id,
-        total: 10.5,
-        products: [{ name: 'Original juice', count: 2, price: 5.25 }],
-        shipping: { street: checkoutBody.shipping.street },
-        payment: { last4: '4242' },
-        invoiceUrl: `/orders/${customer._id}/invoice`,
-      },
+      return structuredClone(order);
     });
-  }
-  expect(cart.checkout).toEqual(frozenSnapshot);
-  expect(orderCreates).toBe(1);
-  expect(invoiceCreates).toBe(1);
-  expect(order.invoiceKey).toBe(invoiceKey);
-  expect(models.carts.findOneAndUpdate).toHaveBeenCalledTimes(1);
-  expect(models.products.find).toHaveBeenCalledTimes(1);
-  const invoice = images.get(invoiceKey)!;
-  expect(invoice.toString()).toMatch(/^%PDF-/);
-  expect(invoice.toString()).toContain('Original juice');
-  expect(invoice.toString()).not.toContain('Changed juice');
-  if (originalInvoice) expect(invoice).toEqual(originalInvoice);
-});
+
+    await api().post('/api/orders/checkout').set('Cookie', cookie()).send(checkoutBody).expect(500);
+    expect(interrupted).toBe(true);
+    expect(cart.status).toBe(0);
+    expect(cart.checkout.price).toBe(10.5);
+    const frozenSnapshot = structuredClone(cart.checkout);
+
+    // Neither later catalog edits nor a changed retry payload may change a closed
+    // cart's snapshot. Repeating checkout must return the same saved order.
+    models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Changed juice', price: 99 }]);
+    const retryBody = {
+      ...checkoutBody,
+      shipping: { ...checkoutBody.shipping, street: 'Changed street' },
+      payment: { method: 'credit_card', last4: '9999' },
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await api()
+        .post('/api/orders/checkout')
+        .set('Cookie', cookie())
+        .send(retryBody)
+        .expect(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        order: {
+          id: customer._id,
+          total: 10.5,
+          products: [{ name: 'Original juice', count: 2, price: 5.25 }],
+          shipping: { street: checkoutBody.shipping.street },
+          payment: { last4: '4242' },
+          invoiceUrl: `/orders/${customer._id}/invoice`,
+        },
+      });
+    }
+    expect(cart.checkout).toEqual(frozenSnapshot);
+    expect(orderCreates).toBe(1);
+    expect(invoiceWrite).not.toHaveBeenCalled();
+    expect(models.carts.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(models.products.find).toHaveBeenCalledTimes(1);
+  },
+);
 
 test('PDF invoices include the review table, frozen line prices and shipping details', () => {
   const order = {
@@ -569,7 +540,7 @@ test('invoice downloads return the stored PDF without regeneration or catalog qu
   const bytes = Buffer.from('%PDF-1.3\noriginal persisted invoice');
   const invoiceKey = `invoices/${customer._id}.pdf`;
   images.set(invoiceKey, bytes);
-  models.orders.findOne.mockResolvedValue({ _id: customer._id, user_id: customer.id, invoiceKey });
+  models.orders.findOne.mockResolvedValue({ _id: customer._id, user_id: customer.id });
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await api()
       .get(`/orders/${customer._id}/invoice`)
@@ -586,7 +557,7 @@ test('invoice downloads return the stored PDF without regeneration or catalog qu
   expect(models.products.find).not.toHaveBeenCalled();
 });
 
-test('checkout recovers from invoice storage failure without creating another order or closing another cart', async () => {
+test('invoice storage failures can be retried independently of checkout', async () => {
   const snapshot = {
     user_id: customer.id,
     price: 12,
@@ -599,21 +570,23 @@ test('checkout recovers from invoice storage failure without creating another or
     _id: customer._id,
     ...update.$setOnInsert,
   }));
+  models.orders.findOne.mockResolvedValue({ _id: customer._id, ...snapshot });
   invoiceWrite.mockRejectedValueOnce(new Error('Object storage temporarily unavailable'));
-  await api().post('/checkout').set('Cookie', cookie()).send(checkoutBody).expect(500);
-  const retried = await api()
-    .post('/checkout')
+  const checkout = await api()
+    .post('/api/orders/checkout')
     .set('Cookie', cookie())
     .send(checkoutBody)
     .expect(200);
-  expect(retried.body.order.invoiceUrl).toBe(`/orders/${customer._id}/invoice`);
-  expect(images.get(`invoices/${customer._id}.pdf`)!.toString()).toContain('Frozen product name');
+  expect(invoiceWrite).not.toHaveBeenCalled();
+  const url = checkout.body.order.invoiceUrl;
+  expect(url).toBe(`/orders/${customer._id}/invoice`);
+  await api().get(url).set('Cookie', cookie()).expect(500);
+  const invoice = await api().get(url).set('Cookie', cookie()).expect(200);
+  expect(invoice.body.toString()).toContain('Frozen product name');
+  expect(invoiceWrite).toHaveBeenCalledTimes(2);
   expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
   expect(models.products.find).not.toHaveBeenCalled();
-  expect(models.orders.findOneAndUpdate).toHaveBeenLastCalledWith(
-    { _id: customer._id },
-    { $set: { invoiceKey: `invoices/${customer._id}.pdf` } },
-  );
+  expect(models.orders.findOneAndUpdate).toHaveBeenCalledTimes(1);
 });
 
 test('S3 storage signs path-style requests, preserves image bytes, and maps missing objects to 404', async () => {
@@ -809,6 +782,75 @@ afterAll(async () => {
   }
 });
 
+describe('MongoDB model schemas', () => {
+  const item = { id: '507f1f77bcf86cd799439013', count: 2, price: 2.5 };
+  const cart = { user_id: 123456789, products: [item], created_at: new Date() };
+  const snapshot = {
+    ...cart,
+    products: [{ ...item, name: 'Milk' }],
+    username: 'shopper@example.com',
+    cart_id: '507f1f77bcf86cd799439014',
+    price: 5,
+    shipping: { city: 'Tel Aviv', street: 'Herzl', date: new Date() },
+    payment: { mode: 'demo', method: 'credit_card', last4: '0042' },
+  };
+
+  test('checkout snapshot round-trips as an order and keeps the original line-item shape', async () => {
+    const closed = new Cart({ ...cart, status: 0, checkout: snapshot });
+    await closed.validate();
+    const stored = closed.toObject();
+    expect(stored.products).toEqual(cart.products);
+    expect(stored.checkout).toEqual(snapshot);
+    await expect(new Order(stored.checkout).validate()).resolves.toBeUndefined();
+    await expect(new Cart({ ...cart, products: [] }).validate()).resolves.toBeUndefined();
+  });
+
+  test('carts reject invalid line items, duplicated items, and invalid status', async () => {
+    await expect(
+      new Cart({ ...cart, products: [{ ...item, count: 1.5 }], status: 2 }).validate(),
+    ).rejects.toMatchObject({
+      errors: { 'products.0.count': expect.anything(), status: expect.anything() },
+    });
+    await expect(new Cart({ ...cart, products: [item, item] }).validate()).rejects.toMatchObject({
+      errors: { products: expect.anything() },
+    });
+  });
+
+  test('orders and checkout snapshots reject malformed payment metadata', async () => {
+    const checkout = { ...snapshot, payment: { ...snapshot.payment, last4: '12345' } };
+    await expect(new Order(checkout).validate()).rejects.toMatchObject({
+      errors: { 'payment.last4': expect.anything() },
+    });
+    await expect(new Cart({ ...cart, checkout }).validate()).rejects.toMatchObject({
+      errors: { 'checkout.payment.last4': expect.anything() },
+    });
+    expect(
+      () => new Order({ ...snapshot, payment: { ...snapshot.payment, cardNumber: '12345' } }),
+    ).toThrow(/cardNumber/);
+  });
+
+  test('products, users and session revocations enforce their field constraints', async () => {
+    await expect(new Product({ category: 'Unknown', price: -1 }).validate()).rejects.toMatchObject({
+      errors: { name: expect.anything(), category: expect.anything(), price: expect.anything() },
+    });
+    await expect(new User({ id: 1.5, role: 5 }).validate()).rejects.toMatchObject({
+      errors: {
+        id: expect.anything(),
+        role: expect.anything(),
+        username: expect.anything(),
+        'name.first_name': expect.anything(),
+        'address.city': expect.anything(),
+      },
+    });
+    await expect(new RevokedSession({ _id: 'invalid' }).validate()).rejects.toMatchObject({
+      errors: { _id: expect.anything() },
+    });
+    await expect(
+      new RevokedSession({ _id: 'a'.repeat(64), expiresAt: null }).validate(),
+    ).resolves.toBeUndefined();
+  });
+});
+
 test('serves the compiled Angular application', async () => {
   const response = await api().get('/').expect(200);
   expect(response.text).toContain('<app-root>');
@@ -847,7 +889,7 @@ test('missing product images return 404', async () => {
 });
 
 test.each([null, customer])('image uploads require an administrator (%s)', async (user) => {
-  const call = api().post('/upload-product-image');
+  const call = api().post('/api/products/images');
   if (user) call.set('Cookie', cookie(user));
   const result = await call
     .attach('image', Buffer.from('not an image'), 'image.png')
@@ -858,7 +900,7 @@ test.each([null, customer])('image uploads require an administrator (%s)', async
 test('uploads detect image format from content and serve the saved file', async () => {
   const source = path.join(__dirname, '..', 'static', 'products', 'edam.png');
   const response = await api()
-    .post('/upload-product-image')
+    .post('/api/products/images')
     .set('Cookie', cookie(admin))
     .attach('image', source, { filename: '../../untrusted.jpg', contentType: 'image/jpeg' })
     .expect(200);
@@ -875,9 +917,9 @@ test('missing uploaded images return 404', async () => {
 });
 
 test('uploads reject missing files and disguised non-images', async () => {
-  await api().post('/upload-product-image').set('Cookie', cookie(admin)).expect(400);
+  await api().post('/api/products/images').set('Cookie', cookie(admin)).expect(400);
   await api()
-    .post('/upload-product-image')
+    .post('/api/products/images')
     .set('Cookie', cookie(admin))
     .attach('image', Buffer.from('<svg onload="alert(1)"></svg>'), {
       filename: 'image.png',
@@ -888,7 +930,7 @@ test('uploads reject missing files and disguised non-images', async () => {
 
 test('uploads reject files larger than 5 MB', async () => {
   await api()
-    .post('/upload-product-image')
+    .post('/api/products/images')
     .set('Cookie', cookie(admin))
     .attach('image', Buffer.alloc(5 * 1024 * 1024 + 1), 'large.png')
     .expect(413);
@@ -900,13 +942,13 @@ test.each([
   jwt.sign({}, 'wrong-key'),
   jwt.sign({ sub: customer._id, exp: 1 }, key),
 ])('rejects missing, malformed, invalid-signature and expired sessions (%s)', async (token) => {
-  const call = api().get('/get-all-products');
+  const call = api().get('/api/products');
   if (token) call.set('Cookie', `SESSIONID=${token}`);
   expect((await call.expect(401)).body).toEqual({ success: false });
   expect(models.products.find).not.toHaveBeenCalled();
 });
 
-test('listing maps product fields and excludes internal data', async () => {
+test('listing, filtering, and search return the same public product fields', async () => {
   models.products.find.mockResolvedValue([
     {
       _id: 'p1',
@@ -917,16 +959,24 @@ test('listing maps product fields and excludes internal data', async () => {
       internal: 'hidden',
     },
   ]);
-  expect((await api().get('/get-all-products').set('Cookie', cookie()).expect(200)).body).toEqual({
+  const catalog = await api().get('/api/products').set('Cookie', cookie()).expect(200);
+  expect(catalog.body).toEqual({
     success: true,
     products: [
       { id: 'p1', name: 'Juice', price: 10, image: 'juice.png', category: 'Wine & Drinks' },
     ],
   });
+  for (const [route, body] of [
+    ['/api/products/by-category', { category: 'Wine & Drinks' }],
+    ['/api/products/search', { name: 'Juice' }],
+  ] as const) {
+    const response = await api().post(route).set('Cookie', cookie()).send(body).expect(200);
+    expect(response.body).toEqual(catalog.body);
+  }
 });
 
 test('listing handles an empty collection', async () => {
-  expect((await api().get('/get-all-products').set('Cookie', cookie())).body).toEqual({
+  expect((await api().get('/api/products').set('Cookie', cookie())).body).toEqual({
     success: true,
     products: [],
   });
@@ -934,7 +984,7 @@ test('listing handles an empty collection', async () => {
 
 test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async (category) => {
   const result = await api()
-    .post('/get-products-by-category')
+    .post('/api/products/by-category')
     .set('Cookie', cookie())
     .send({ category })
     .expect(200);
@@ -945,15 +995,15 @@ test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async (c
   else expect(models.products.find).toHaveBeenCalledWith({ category });
 });
 
-for (const [route, collection, field] of [
-  ['total-products', 'products', 'productsCount'],
-  ['total-orders', 'orders', 'ordersCount'],
+for (const [route, collection] of [
+  ['api/products/count', 'products'],
+  ['api/orders/count', 'orders'],
 ] as const) {
   test.each([0, 7])(`${route} returns count %i`, async (count) => {
     models[collection].countDocuments.mockResolvedValue(count);
     expect((await api().get(`/${route}`).set('Cookie', cookie()).expect(200)).body).toEqual({
       success: true,
-      [field]: count,
+      count,
     });
   });
 }
@@ -965,25 +1015,25 @@ test.each([true, false])(
       ? cookie()
       : `SESSIONID=${jwt.sign({ data: JSON.stringify(customer) }, key)}`;
     const otherSession = cookie(customer, { jwtid: 'other-session' });
-    await api().get('/reconect').set('Cookie', session).expect(200);
-    const result = await api().post('/logout').set('Cookie', session).expect(200);
+    await api().get('/api/auth/session').set('Cookie', session).expect(200);
+    const result = await api().post('/api/auth/logout').set('Cookie', session).expect(200);
     expect(result.body).toEqual({ success: true });
     expect(result.headers['set-cookie'][0]).toMatch(/SESSIONID=;.*Expires=Thu, 01 Jan 1970/);
-    await api().get('/reconect').set('Cookie', session).expect(401);
-    await api().get('/reconect').set('Cookie', otherSession).expect(200);
+    await api().get('/api/auth/session').set('Cookie', session).expect(401);
+    await api().get('/api/auth/session').set('Cookie', otherSession).expect(200);
   },
 );
 
 for (const [method, route, allowedRole] of [
-  ['post', 'add-product', 1],
-  ['post', 'edit-product', 1],
-  ['post', 'delete-product', 1],
-  ['get', 'get-last-order', 0],
-  ['get', 'total-orders', 0],
-  ['get', 'total-products', 0],
-  ['post', 'create-cart', 0],
-  ['post', 'update-cart', 0],
-  ['get', 'get-cart', 0],
+  ['post', 'api/products/create', 1],
+  ['post', 'api/products/update', 1],
+  ['post', 'api/products/delete', 1],
+  ['get', 'api/orders/latest', 0],
+  ['get', 'api/orders/count', 0],
+  ['get', 'api/products/count', 0],
+  ['post', 'api/carts', 0],
+  ['post', 'api/carts/update', 0],
+  ['get', 'api/carts/current', 0],
 ]) {
   test(`${route} rejects the wrong role through the Nest guard`, async () => {
     const result = await api()
@@ -998,9 +1048,9 @@ for (const [method, route, allowedRole] of [
 }
 
 test.each([
-  ['login', 20],
-  ['sign-up', 5],
-  ['check-signup', 5],
+  ['api/auth/login', 20],
+  ['api/auth/signup', 5],
+  ['api/auth/signup/availability', 5],
 ] as const)(
   '%s limits requests before accessing the database and allows requests after expiry',
   async (route, limit) => {
@@ -1010,7 +1060,7 @@ test.each([
         await api()
           .post(`/${route}`)
           .send({})
-          .expect(route === 'login' ? 401 : 200);
+          .expect(route === 'api/auth/login' ? 401 : 200);
       }
       models.users.findOne.mockClear();
       models.users.create.mockClear();
@@ -1024,14 +1074,14 @@ test.each([
       expect(models.users.findOne).not.toHaveBeenCalled();
       expect(models.users.create).not.toHaveBeenCalled();
       await api()
-        .post(route === 'login' ? '/sign-up' : '/login')
+        .post(route === 'api/auth/login' ? '/api/auth/signup' : '/api/auth/login')
         .send({})
-        .expect(route === 'login' ? 200 : 401);
+        .expect(route === 'api/auth/login' ? 200 : 401);
       clock.mockReturnValue(Date.now() + 15 * 60 * 1000);
       await api()
         .post(`/${route}`)
         .send({})
-        .expect(route === 'login' ? 401 : 200);
+        .expect(route === 'api/auth/login' ? 401 : 200);
     } finally {
       clock.mockRestore();
     }
@@ -1079,7 +1129,7 @@ test('login sets an HTTP-only cookie without exposing the password hash in its p
     password: await bcrypt.hash('password123', 4),
   });
   const result = await api()
-    .post('/login')
+    .post('/api/auth/login')
     .send({ username: customer.username, password: 'password123' })
     .expect(200);
   expect(result.body).toEqual({
@@ -1110,7 +1160,7 @@ test.each(['production', 'development', 'test', undefined])(
         password: await bcrypt.hash('password123', 4),
       });
       const result = await api()
-        .post('/login')
+        .post('/api/auth/login')
         .send({ username: customer.username, password: 'password123' })
         .expect(200);
       expect(result.body.success).toBe(true);
@@ -1137,17 +1187,17 @@ test.each([false, true, undefined])(
     });
     models.users.findOneAndUpdate.mockResolvedValue({ ...customer, has_logged_in: hasLoggedIn });
     const login = await api()
-      .post('/login')
+      .post('/api/auth/login')
       .send({ username: customer.username, password: 'password123' })
       .expect(200);
     expect(login.body.isReturning).toBe(hasLoggedIn !== false);
     expect(models.users.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: customer._id },
       { $set: { has_logged_in: true } },
-      { returnDocument: 'before' },
+      { returnDocument: 'before', runValidators: true },
     );
     const sessionCookie = login.headers['set-cookie'][0].split(';')[0];
-    const reconnect = await api().get('/reconect').set('Cookie', sessionCookie).expect(200);
+    const reconnect = await api().get('/api/auth/session').set('Cookie', sessionCookie).expect(200);
     expect(reconnect.body.isReturning).toBe(hasLoggedIn !== false);
   },
 );
@@ -1161,7 +1211,7 @@ test('login rejects incorrect credentials and invalid input', async () => {
     { username: customer.username, password: 'wrongpass' },
     { username: 'invalid', password: 'short' },
   ]) {
-    const result = await api().post('/login').send(body).expect(401);
+    const result = await api().post('/api/auth/login').send(body).expect(401);
     expect(result.body).toEqual({ success: false });
     expect(result.headers['set-cookie']).toBeUndefined();
   }
@@ -1169,7 +1219,7 @@ test('login rejects incorrect credentials and invalid input', async () => {
 
 test('signup hashes the password and forces the customer role', async () => {
   const result = await api()
-    .post('/sign-up')
+    .post('/api/auth/signup')
     .send({
       id: '123456789',
       firstName: 'John',
@@ -1181,7 +1231,7 @@ test('signup hashes the password and forces the customer role', async () => {
       role: 1,
     })
     .expect(200);
-  expect(result.body).toEqual({ created: true });
+  expect(result.body).toEqual({ success: true });
   const saved = models.users.create.mock.calls[0][0];
   expect(saved.role).toBe(0);
   expect(saved.has_logged_in).toBe(false);
@@ -1200,7 +1250,7 @@ test.each([
   { firstName: 'Jose\u0301', lastName: 'silva', city: 'São Paulo', street: 'Rua São João 1' },
 ])('signup accepts international details: %j', async (details) => {
   const result = await api()
-    .post('/sign-up')
+    .post('/api/auth/signup')
     .send({
       id: '123456789',
       email: customer.username,
@@ -1208,7 +1258,7 @@ test.each([
       ...details,
     })
     .expect(200);
-  expect(result.body).toEqual({ created: true });
+  expect(result.body).toEqual({ success: true });
   expect(models.users.create).toHaveBeenCalledWith(
     expect.objectContaining({
       name: { first_name: details.firstName, last_name: details.lastName },
@@ -1227,7 +1277,7 @@ test.each([
   { street: 'A'.repeat(151) },
 ])('signup rejects invalid details: %j', async (details) => {
   const result = await api()
-    .post('/sign-up')
+    .post('/api/auth/signup')
     .send({
       id: '123456789',
       email: customer.username,
@@ -1239,20 +1289,20 @@ test.each([
       ...details,
     })
     .expect(200);
-  expect(result.body.created).toBe(false);
+  expect(result.body.success).toBe(false);
   expect(models.users.create).not.toHaveBeenCalled();
 });
 
 test('signup rejects invalid input without writing to the database', async () => {
-  expect((await api().post('/sign-up').send({}).expect(200)).body.created).toBe(false);
+  expect((await api().post('/api/auth/signup').send({}).expect(200)).body.success).toBe(false);
   expect(models.users.create).not.toHaveBeenCalled();
 });
 
-test('reconnect preserves the existing response shape', async () => {
-  expect((await api().get('/reconect').set('Cookie', cookie()).expect(200)).body).toEqual({
+test('session lookup returns the same profile shape as login', async () => {
+  expect((await api().get('/api/auth/session').set('Cookie', cookie()).expect(200)).body).toEqual({
     success: true,
     role: 0,
-    name: customer.name,
+    name: `${customer.name.first_name} ${customer.name.last_name}`,
     user: customer._id,
     isReturning: true,
   });
@@ -1261,13 +1311,14 @@ test('reconnect preserves the existing response shape', async () => {
 test('accepts existing legacy JWT sessions', async () => {
   const token = jwt.sign({ data: JSON.stringify(customer) }, key, { expiresIn: '1h' });
   expect(
-    (await api().get('/reconect').set('Cookie', `SESSIONID=${token}`).expect(200)).body.success,
+    (await api().get('/api/auth/session').set('Cookie', `SESSIONID=${token}`).expect(200)).body
+      .success,
   ).toBe(true);
 });
 
 test('search accepts the frontend product field and escapes regex characters', async () => {
   await api()
-    .post('/find-product')
+    .post('/api/products/search')
     .set('Cookie', cookie())
     .send({ product: 'Juice (1L)' })
     .expect(200);
@@ -1278,7 +1329,7 @@ test('search accepts the frontend product field and escapes regex characters', a
 
 test.each(['0.00', '10.99', '001.25', 10.99])('admin can save price %j', async (price) => {
   const response = await api()
-    .post('/add-product')
+    .post('/api/products/create')
     .set('Cookie', cookie(admin))
     .send({
       name: 'Juice',
@@ -1307,7 +1358,7 @@ test.each([
   '9007199254740992.00',
 ])('admin rejects invalid price %j without writing', async (price) => {
   const response = await api()
-    .post('/add-product')
+    .post('/api/products/create')
     .set('Cookie', cookie(admin))
     .send({
       name: 'Juice',
@@ -1322,7 +1373,8 @@ test.each([
 test('admin can add a valid product', async () => {
   const body = { name: 'Juice', category: 'Wine & Drinks', price: '10.00', image: 'juice.png' };
   expect(
-    (await api().post('/add-product').set('Cookie', cookie(admin)).send(body).expect(200)).body,
+    (await api().post('/api/products/create').set('Cookie', cookie(admin)).send(body).expect(200))
+      .body,
   ).toEqual({ success: true });
   expect(models.products.create).toHaveBeenCalledWith({ ...body, price: Number(body.price) });
 });
@@ -1332,7 +1384,7 @@ test('admin can edit a product', async () => {
   expect(
     (
       await api()
-        .post('/edit-product')
+        .post('/api/products/update')
         .set('Cookie', cookie(admin))
         .send({
           id: customer._id,
@@ -1347,8 +1399,8 @@ test('admin can edit a product', async () => {
 });
 
 test.each([
-  ['add-product', 'create'],
-  ['edit-product', 'findByIdAndUpdate'],
+  ['api/products/create', 'create'],
+  ['api/products/update', 'findByIdAndUpdate'],
 ] as const)('admin product writes report duplicate key conflicts on %s', async (route, method) => {
   const { MongoServerError } = require('mongoose').mongo;
   models.products[method].mockRejectedValueOnce(
@@ -1365,7 +1417,7 @@ test.each([
 test('cart updates enforce ownership and open status', async () => {
   models.carts.findOneAndUpdate.mockResolvedValue(null);
   const result = await api()
-    .post('/update-cart')
+    .post('/api/carts/update')
     .set('Cookie', cookie())
     .send({ id: customer._id, products: [] })
     .expect(200);
@@ -1373,19 +1425,20 @@ test('cart updates enforce ownership and open status', async () => {
   expect(models.carts.findOneAndUpdate).toHaveBeenCalledWith(
     { _id: customer._id, user_id: customer.id, status: 1 },
     { $set: { products: [] } },
+    { returnDocument: 'after', runValidators: true },
   );
 });
 
 test('creates and retrieves an open cart using the existing user id', async () => {
-  models.carts.create.mockResolvedValue({ _id: 'cart1', created_at: '2026-01-01' });
+  models.carts.create.mockResolvedValue({ _id: 'cart1', products: [], created_at: '2026-01-01' });
   expect(
-    (await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200))
+    (await api().post('/api/carts').set('Cookie', cookie()).send({ products: [] }).expect(200))
       .body,
-  ).toEqual({ success: true, id: 'cart1', date: '2026-01-01', products: [] });
+  ).toEqual({ success: true, cart: { id: 'cart1', products: [], createdAt: '2026-01-01' } });
   models.carts.findOne.mockResolvedValue({ _id: 'cart1', products: [], created_at: '2026-01-01' });
-  expect((await api().get('/get-cart').set('Cookie', cookie()).expect(200)).body).toEqual({
+  expect((await api().get('/api/carts/current').set('Cookie', cookie()).expect(200)).body).toEqual({
     success: true,
-    cart: { id: 'cart1', products: [], created: '2026-01-01' },
+    cart: { id: 'cart1', products: [], createdAt: '2026-01-01' },
   });
 });
 
@@ -1395,7 +1448,7 @@ test('a concurrent duplicate cart insert returns the normal failure response', a
     new MongoServerError({ code: 11000, message: 'duplicate key' }),
   );
   expect(
-    (await api().post('/create-cart').set('Cookie', cookie()).send({ products: [] }).expect(200))
+    (await api().post('/api/carts').set('Cookie', cookie()).send({ products: [] }).expect(200))
       .body,
   ).toEqual({ success: false });
 });
@@ -1403,14 +1456,15 @@ test('a concurrent duplicate cart insert returns the normal failure response', a
 test('order history returns a response even when no orders exist', async () => {
   const sort = jest.fn<(...args: unknown[]) => Promise<null>>().mockResolvedValue(null);
   models.orders.findOne.mockReturnValue({ sort });
-  expect((await api().get('/get-last-order').set('Cookie', cookie()).expect(200)).body).toEqual({
+  expect((await api().get('/api/orders/latest').set('Cookie', cookie()).expect(200)).body).toEqual({
     success: true,
+    order: null,
   });
   expect(models.orders.findOne).toHaveBeenCalledWith({ user_id: customer.id });
   expect(sort).toHaveBeenCalledWith({ _id: -1 });
 });
 
-describe.each(['create-cart', 'update-cart'])('%s validates cart contents', (route) => {
+describe.each(['api/carts', 'api/carts/update'])('%s validates cart contents', (route) => {
   const productId = '507f1f77bcf86cd799439013';
   const item = { id: productId, count: 2, price: -100, extra: 'discard' };
   const send = (products: unknown) =>
@@ -1441,11 +1495,14 @@ describe.each(['create-cart', 'update-cart'])('%s validates cart contents', (rou
 
   test('persists and returns catalog prices, discarding client prices and extra fields', async () => {
     models.products.find.mockResolvedValue([{ _id: productId, price: 4.5 }]);
-    models.carts.create.mockResolvedValue({ _id: 'cart1' });
-    models.carts.findOneAndUpdate.mockResolvedValue({ _id: customer._id });
     const products = [{ id: productId, count: 2, price: 4.5 }];
-    expect((await send([item]).expect(200)).body).toMatchObject({ success: true, products });
-    if (route === 'create-cart')
+    models.carts.create.mockResolvedValue({ _id: 'cart1', products });
+    models.carts.findOneAndUpdate.mockResolvedValue({ _id: customer._id, products });
+    expect((await send([item]).expect(200)).body).toMatchObject({
+      success: true,
+      cart: { products },
+    });
+    if (route === 'api/carts')
       expect(models.carts.create.mock.calls[0][0].products).toEqual(products);
     else expect(models.carts.findOneAndUpdate.mock.calls[0][1]).toEqual({ $set: { products } });
   });
@@ -1459,7 +1516,7 @@ test.each([undefined, '', 'invalid', { $ne: null }])(
   'product deletion rejects invalid id %j',
   async (id) => {
     const response = await api()
-      .post('/delete-product')
+      .post('/api/products/delete')
       .set('Cookie', cookie(admin))
       .send({ id })
       .expect(200);
@@ -1473,7 +1530,7 @@ test.each([true, false])(
   async (exists) => {
     models.products.findByIdAndDelete.mockResolvedValue(exists ? { _id: customer._id } : null);
     const response = await api()
-      .post('/delete-product')
+      .post('/api/products/delete')
       .set('Cookie', cookie(admin))
       .send({ id: customer._id })
       .expect(200);
@@ -1483,9 +1540,9 @@ test.each([true, false])(
 );
 
 test('product deletion rejects anonymous and unverified requests', async () => {
-  await api().post('/delete-product').send({ id: customer._id }).expect(401);
+  await api().post('/api/products/delete').send({ id: customer._id }).expect(401);
   await request(app.getHttpServer())
-    .post('/delete-product')
+    .post('/api/products/delete')
     .set('Cookie', cookie(admin))
     .send({ id: customer._id })
     .expect(403);
@@ -1504,7 +1561,7 @@ test.each([
       query.username ? (emailExists ? customer : null) : idExists ? customer : null,
     );
     const response = await api()
-      .post('/check-signup')
+      .post('/api/auth/signup/availability')
       .send({ email: customer.username, id: '123456789' })
       .expect(200);
     expect(response.body).toEqual({
@@ -1524,8 +1581,16 @@ test.each([
   { email: { $ne: null }, id: '123456789' },
   { email: 'buyer@example.com', id: { $ne: null } },
   { email: 'invalid', id: '1' },
+  ...[
+    '@example.com',
+    'buyer@@example.com',
+    'buyer@example',
+    'buyer@.com',
+    'buyer@example.',
+    'buyer@example.com\n',
+  ].map((email) => ({ email, id: '123456789' })),
 ])('signup availability rejects malformed input %j', async (body) => {
-  const response = await api().post('/check-signup').send(body).expect(200);
+  const response = await api().post('/api/auth/signup/availability').send(body).expect(200);
   expect(response.body.available).toBe(false);
   expect(response.body.success).toBe(false);
   expect(models.users.findOne).not.toHaveBeenCalled();
@@ -1534,7 +1599,7 @@ test.each([
 test('final signup rejects an existing ID even with a different email', async () => {
   models.users.findOne.mockImplementation(async (query) => (query.id ? customer : null));
   const response = await api()
-    .post('/sign-up')
+    .post('/api/auth/signup')
     .send({
       id: '123456789',
       email: 'new@example.com',
@@ -1546,7 +1611,7 @@ test('final signup rejects an existing ID even with a different email', async ()
     })
     .expect(200);
   expect(response.body).toEqual({
-    created: false,
+    success: false,
     reason: 'This ID number is already registered.',
   });
   expect(models.users.create).not.toHaveBeenCalled();
@@ -1558,7 +1623,7 @@ test('final signup reports a concurrent duplicate registration', async () => {
     new MongoServerError({ code: 11000, message: 'duplicate key' }),
   );
   const response = await api()
-    .post('/sign-up')
+    .post('/api/auth/signup')
     .send({
       id: '123456789',
       email: 'new@example.com',
@@ -1570,7 +1635,7 @@ test('final signup reports a concurrent duplicate registration', async () => {
     })
     .expect(200);
   expect(response.body).toEqual({
-    created: false,
+    success: false,
     reason: 'An account with this email or ID number already exists.',
   });
 });

@@ -1,25 +1,9 @@
-import type { OrderRecord } from '../types/contracts';
 import mongoose from 'mongoose';
-const Schema = mongoose.Schema;
-const orderSchema = new Schema<OrderRecord>({
-  user_id: Number,
-  username: String,
-  cart_id: String,
-  price: Number,
-  shipping: {
-    city: String,
-    street: String,
-    date: Date,
-  },
-  created_at: Date,
-  products: [],
-  invoiceKey: String,
-  payment: {
-    mode: String,
-    method: String,
-    last4: String,
-  },
-});
+import type { OrderSnapshot } from '../types/contracts';
+import { orderSnapshotFields } from './order-snapshot.schema';
+
+const orderSchema = new mongoose.Schema<OrderSnapshot>(orderSnapshotFields, { strict: 'throw' });
+
 orderSchema.index(
   { cart_id: 1 },
   {
@@ -28,4 +12,5 @@ orderSchema.index(
     name: 'one_demo_order_per_cart',
   },
 );
+
 export = mongoose.model('orders', orderSchema);

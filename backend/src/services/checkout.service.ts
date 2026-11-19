@@ -1,28 +1,48 @@
-import { CheckoutInput, UserRecord, record } from '../types/contracts';
+import { CheckoutInput, OrderSnapshot, UserRecord, record } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ProductsService } from './products.service';
-import { InvoiceService } from './invoice.service';
 
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
+
+function orderResponse(order: OrderSnapshot & { _id: unknown }) {
+  return {
+    id: order._id,
+    total: order.price,
+    createdAt: order.created_at,
+    products: order.products,
+    shipping: order.shipping
+      ? { city: order.shipping.city, street: order.shipping.street, date: order.shipping.date }
+      : undefined,
+    ...(order.payment?.mode === 'demo'
+      ? {
+          payment: {
+            mode: order.payment.mode,
+            method: order.payment.method,
+            last4: order.payment.last4,
+          },
+          invoiceUrl: `/orders/${order._id}/invoice`,
+        }
+      : {}),
+  };
+}
 
 @Injectable()
 export class CheckoutService {
   constructor(
     @Inject(MODELS) private readonly models: DatabaseModels,
     private readonly products: ProductsService,
-    private readonly invoices: InvoiceService,
   ) {}
 
   async count() {
-    return { success: true, ordersCount: await this.models.orders.countDocuments({}) };
+    return { success: true, count: await this.models.orders.countDocuments({}) };
   }
 
   async lastOrder(user: Pick<UserRecord, 'id' | 'username'>) {
     const order = await this.models.orders.findOne({ user_id: user.id }).sort({ _id: -1 });
-    return order ? { success: true, order } : { success: true };
+    return { success: true, order: order ? orderResponse(order) : null };
   }
 
   async checkout(user: Pick<UserRecord, 'id' | 'username'>, body: CheckoutInput) {
@@ -102,7 +122,7 @@ export class CheckoutService {
       const closed = await this.models.carts.findOneAndUpdate(
         { _id: cart._id, user_id: user.id, status: 1, products: cart.products },
         { $set: { status: 0, checkout: snapshot } },
-        { returnDocument: 'after' },
+        { returnDocument: 'after', runValidators: true },
       );
       cart = closed || (await this.models.carts.findOne({ _id: cartId, user_id: user.id }));
     }
@@ -114,8 +134,8 @@ export class CheckoutService {
     try {
       order = await this.models.orders.findOneAndUpdate(
         query,
-        { $setOnInsert: cart.checkout },
-        { upsert: true, returnDocument: 'after' },
+        { $setOnInsert: cart.toObject?.().checkout ?? cart.checkout },
+        { upsert: true, returnDocument: 'after', runValidators: true },
       );
     } catch (error) {
       if (!(error instanceof mongoose.mongo.MongoServerError) || error.code !== 11000) {
@@ -124,17 +144,6 @@ export class CheckoutService {
       order = await this.models.orders.findOne(query);
     }
     if (!order) throw new Error('Unable to recover the checkout order.');
-    const invoiceUrl = await this.invoices.ensure(order);
-    return {
-      success: true,
-      order: {
-        id: order._id,
-        total: order.price,
-        products: order.products,
-        shipping: order.shipping,
-        payment: order.payment,
-        invoiceUrl,
-      },
-    };
+    return { success: true, order: orderResponse(order) };
   }
 }

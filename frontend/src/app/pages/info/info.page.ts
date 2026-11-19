@@ -23,8 +23,8 @@ export class InfoPage implements OnInit {
       if (!products.success || !orders.success) {
         throw new Error();
       }
-      this.products.set(products.productsCount ?? 0);
-      this.orders.set(orders.ordersCount ?? 0);
+      this.products.set(products.count ?? 0);
+      this.orders.set(orders.count ?? 0);
     } catch {
       this.error.set('Unable to load shop information. Please try again.');
     } finally {

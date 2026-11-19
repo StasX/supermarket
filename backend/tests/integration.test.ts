@@ -57,7 +57,7 @@ const registration = {
 };
 
 async function csrfHeaders(cookie = '') {
-  const bootstrap = await fetch(base + '/csrf-token', {
+  const bootstrap = await fetch(base + '/api/auth/csrf-token', {
     headers: cookie ? { Cookie: cookie } : {},
     signal: AbortSignal.timeout(5000),
   });
@@ -115,6 +115,7 @@ before(
       username: 'admin@example.com',
       password: bcrypt.hashSync(password, bcrypt.genSaltSync(4)),
       name: { first_name: 'Admin', last_name: 'User' },
+      address: { city: 'Tel Aviv', street: 'Ha Masger 10' },
       role: 1,
     });
     temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'shop-integration-'));
@@ -166,20 +167,28 @@ test('public storefront is served and protected routes reject anonymous requests
   const response = await fetch(base);
   assert.equal(response.status, 200);
   assert.match(await response.text(), /<html/i);
-  for (const route of ['/get-all-products', '/get-cart', '/reconect', '/total-products']) {
+  for (const route of [
+    '/api/products',
+    '/api/carts/current',
+    '/api/auth/session',
+    '/api/products/count',
+  ]) {
     assert.deepEqual((await request(route, { status: 401 })).body, { success: false });
   }
 });
 
 test('signup persists a hashed password, rejects duplicates, and login creates a session', async () => {
-  const available = await request('/check-signup', {
+  const available = await request('/api/auth/signup/availability', {
     method: 'POST',
     body: { email: registration.email, id: registration.id },
   });
   assert.equal(available.body.available, true);
-  assert.deepEqual((await request('/sign-up', { method: 'POST', body: registration })).body, {
-    created: true,
-  });
+  assert.deepEqual(
+    (await request('/api/auth/signup', { method: 'POST', body: registration })).body,
+    {
+      success: true,
+    },
+  );
   const user = await User.findOne({ username: registration.email });
   assert.notEqual(user.password, password);
   assert.ok(bcrypt.compareSync(password, user.password));
@@ -189,20 +198,23 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
     [registration.email, '333444555', true, false],
     ['different@example.com', registration.id, false, true],
   ] as const) {
-    const result = await request('/check-signup', { method: 'POST', body: { email, id } });
+    const result = await request('/api/auth/signup/availability', {
+      method: 'POST',
+      body: { email, id },
+    });
     assert.equal(result.body.available, false);
     assert.equal(result.body.emailExists, emailExists);
     assert.equal(result.body.idExists, idExists);
   }
-  const duplicateId = await request('/sign-up', {
+  const duplicateId = await request('/api/auth/signup', {
     method: 'POST',
     body: { ...registration, email: 'different@example.com' },
   });
-  assert.equal(duplicateId.body.created, false);
+  assert.equal(duplicateId.body.success, false);
   assert.equal(duplicateId.body.reason, 'This ID number is already registered.');
 
   assert.equal(
-    (await request('/sign-up', { method: 'POST', body: registration })).body.created,
+    (await request('/api/auth/signup', { method: 'POST', body: registration })).body.success,
     false,
   );
   for (const credentials of [
@@ -211,7 +223,7 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
     { username: 'missing@example.com', password },
   ]) {
     assert.deepEqual(
-      (await request('/login', { method: 'POST', body: credentials, status: 401 })).body,
+      (await request('/api/auth/login', { method: 'POST', body: credentials, status: 401 })).body,
       {
         success: false,
       },
@@ -221,7 +233,10 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
     [registration.email, 0],
     ['admin@example.com', 1],
   ]) {
-    const login = await request('/login', { method: 'POST', body: { username, password } });
+    const login = await request('/api/auth/login', {
+      method: 'POST',
+      body: { username, password },
+    });
     assert.equal(login.body.success, true);
     assert.equal(login.body.role, role);
     assert.equal(login.body.isReturning, role !== 0);
@@ -230,23 +245,24 @@ test('signup persists a hashed password, rejects duplicates, and login creates a
     const cookie = login.cookie.split(';')[0];
     if (role === 0) customerCookie = cookie;
     else adminCookie = cookie;
-    const session = await request('/reconect', { cookie });
-    assert.equal(session.body.user, login.body.user);
-    assert.equal(session.body.role, role);
-    assert.equal(session.body.isReturning, login.body.isReturning);
+    const session = await request('/api/auth/session', { cookie });
+    assert.deepEqual(session.body, login.body);
   }
 });
 
 test('a second login is recognized without any prior purchases', async () => {
   assert.equal(await Order.countDocuments({ user_id: Number(registration.id) }), 0);
   assert.equal((await User.findOne({ username: registration.email })).has_logged_in, true);
-  const login = await request('/login', {
+  const login = await request('/api/auth/login', {
     method: 'POST',
     body: { username: registration.email, password },
   });
   assert.equal(login.body.isReturning, true);
   customerCookie = login.cookie!.split(';')[0];
-  assert.equal((await request('/reconect', { cookie: customerCookie })).body.isReturning, true);
+  assert.equal(
+    (await request('/api/auth/session', { cookie: customerCookie })).body.isReturning,
+    true,
+  );
 });
 
 test('admin product writes persist, validate input, and enforce customer permissions', async () => {
@@ -257,7 +273,7 @@ test('admin product writes persist, validate input, and enforce customer permiss
     image: 'test-milk.png',
   };
   const add = (body: unknown, cookie = adminCookie) =>
-    request('/add-product', {
+    request('/api/products/create', {
       method: 'POST',
       body,
       cookie,
@@ -274,7 +290,7 @@ test('admin product writes persist, validate input, and enforce customer permiss
   const edit = { ...product, id: String(stored._id), price: '5.25' };
   assert.equal(
     (
-      await request('/edit-product', {
+      await request('/api/products/update', {
         method: 'POST',
         body: edit,
         cookie: customerCookie,
@@ -284,49 +300,54 @@ test('admin product writes persist, validate input, and enforce customer permiss
     false,
   );
   assert.equal(
-    (await request('/edit-product', { method: 'POST', body: edit, cookie: adminCookie })).body
-      .success,
+    (await request('/api/products/update', { method: 'POST', body: edit, cookie: adminCookie }))
+      .body.success,
     true,
   );
   assert.equal((await Product.findById(stored._id)).price, 5.25);
-  const catalog = (await request('/get-all-products', { cookie: customerCookie })).body;
+  const catalog = (await request('/api/products', { cookie: customerCookie })).body;
   assert.equal(catalog.success, true);
   assert.deepEqual(catalog.products, [{ id: String(stored._id), ...product, price: 5.25 }]);
-  const category = await request('/get-products-by-category', {
+  const category = await request('/api/products/by-category', {
     method: 'POST',
     cookie: customerCookie,
     body: { category: product.category },
   });
-  assert.equal(category.body.products.length, 1);
-  assert.equal(
-    (await request('/total-products', { cookie: customerCookie })).body.productsCount,
-    1,
-  );
+  assert.deepEqual(category.body, catalog);
+  const search = await request('/api/products/search', {
+    method: 'POST',
+    cookie: customerCookie,
+    body: { name: 'test milk' },
+  });
+  assert.deepEqual(search.body, catalog);
+  assert.equal((await request('/api/products/count', { cookie: customerCookie })).body.count, 1);
 });
 
 test('customer cart creation, duplicate rejection, update and retrieval use MongoDB', async () => {
-  assert.deepEqual((await request('/get-cart', { cookie: customerCookie })).body, {
+  assert.deepEqual((await request('/api/carts/current', { cookie: customerCookie })).body, {
     success: true,
+    cart: null,
   });
   const create = (cookie: string) =>
-    request('/create-cart', {
+    request('/api/carts', {
       method: 'POST',
       body: { products: [] },
       cookie,
       status: cookie === adminCookie ? 403 : 200,
     });
   assert.equal((await create(adminCookie)).body.success, false);
-  const created = (await create(customerCookie)).body;
-  assert.equal(created.success, true);
+  const creation = (await create(customerCookie)).body;
+  const created = creation.cart;
+  assert.equal(creation.success, true);
   assert.ok(created.id);
-  assert.ok(created.date);
+  assert.ok(created.createdAt);
   assert.equal((await create(customerCookie)).body.success, false);
   assert.equal(await Cart.countDocuments({}), 1);
   const product = await Product.findOne({});
   const products = [{ id: String(product._id), count: 2, price: product.price }];
   assert.equal(
     (
-      await request('/update-cart', {
+      await request('/api/carts/update', {
         method: 'POST',
         cookie: customerCookie,
         body: { products },
@@ -336,7 +357,7 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
   );
   assert.equal(
     (
-      await request('/update-cart', {
+      await request('/api/carts/update', {
         method: 'POST',
         cookie: customerCookie,
         body: { id: created.id, products: [{ ...products[0], price: -100 }] },
@@ -344,11 +365,11 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
     ).body.success,
     true,
   );
-  const cart = (await request('/get-cart', { cookie: customerCookie })).body.cart;
+  const cart = (await request('/api/carts/current', { cookie: customerCookie })).body.cart;
   assert.equal(cart.id, created.id);
   assert.deepEqual(cart.products, products);
   assert.deepEqual((await Cart.findById(created.id)).toObject().products, products);
-  assert.equal((await request('/total-orders', { cookie: customerCookie })).body.ordersCount, 0);
+  assert.equal((await request('/api/orders/count', { cookie: customerCookie })).body.count, 0);
 });
 
 test('concurrent cart creation allows one open cart while preserving closed carts', async () => {
@@ -357,7 +378,7 @@ test('concurrent cart creation allows one open cart while preserving closed cart
   const closedCount = await Cart.countDocuments({ user_id: userId, status: 0 });
   const results = await Promise.all(
     Array.from({ length: 10 }, () =>
-      request('/create-cart', {
+      request('/api/carts', {
         method: 'POST',
         cookie: customerCookie,
         body: { products: [] },
@@ -369,16 +390,17 @@ test('concurrent cart creation allows one open cart while preserving closed cart
   assert.equal(await Cart.countDocuments({ user_id: userId, status: 1 }), 1);
   assert.equal(await Cart.countDocuments({ user_id: userId, status: 0 }), closedCount);
   await assert.rejects(
-    Cart.create({ user_id: userId, products: [], status: 1 }),
+    Cart.create({ user_id: userId, products: [], created_at: new Date(), status: 1 }),
     (error: any) => error.code === 11000,
   );
-  await Cart.create({ user_id: userId + 1, products: [], status: 1 });
+  await Cart.create({ user_id: userId + 1, products: [], created_at: new Date(), status: 1 });
 });
 
 test('checkout saves shipping and demo payment once, closes the cart, and survives retries', async () => {
   const cart = await Cart.findOne({ user_id: Number(registration.id), status: 1 });
   const product = await Product.findOne({});
-  await Cart.updateOne(
+  // Simulate a stale price already stored in MongoDB outside the validated model writes.
+  await Cart.collection.updateOne(
     { _id: cart._id },
     { $set: { products: [{ id: String(product._id), count: 2, price: -1 }] } },
   );
@@ -389,13 +411,19 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
     total: 0.01,
   };
   assert.equal(
-    (await request('/checkout', { method: 'POST', cookie: adminCookie, body, status: 403 })).body
-      .success,
+    (
+      await request('/api/orders/checkout', {
+        method: 'POST',
+        cookie: adminCookie,
+        body,
+        status: 403,
+      })
+    ).body.success,
     false,
   );
   assert.equal(
     (
-      await request('/checkout', {
+      await request('/api/orders/checkout', {
         method: 'POST',
         cookie: customerCookie,
         body: { ...body, shipping: { ...body.shipping, date: '2000-01-01' } },
@@ -406,7 +434,7 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
   assert.equal((await Cart.findById(cart._id)).status, 1);
   const results = await Promise.all(
     Array.from({ length: 5 }, () =>
-      request('/checkout', { method: 'POST', cookie: customerCookie, body }),
+      request('/api/orders/checkout', { method: 'POST', cookie: customerCookie, body }),
     ),
   );
   assert.ok(results.every((result) => result.body.success));
@@ -419,16 +447,20 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
   assert.deepEqual(order.payment, { mode: 'demo', method: 'credit_card', last4: '4242' });
   assert.equal(order.credit_card, undefined);
   assert.equal((await Cart.findById(cart._id)).status, 0);
-  assert.equal((await request('/get-cart', { cookie: customerCookie })).body.cart, undefined);
-  assert.equal(
-    (await request('/get-last-order', { cookie: customerCookie })).body.order._id,
-    String(order._id),
+  assert.equal((await request('/api/carts/current', { cookie: customerCookie })).body.cart, null);
+  assert.deepEqual(
+    (await request('/api/orders/latest', { cookie: customerCookie })).body,
+    results[0].body,
   );
-  const repeated = await request('/checkout', { method: 'POST', cookie: customerCookie, body });
+  const repeated = await request('/api/orders/checkout', {
+    method: 'POST',
+    cookie: customerCookie,
+    body,
+  });
   assert.equal(repeated.body.order.id, String(order._id));
   assert.equal(
     (
-      await request('/create-cart', {
+      await request('/api/carts', {
         method: 'POST',
         cookie: customerCookie,
         body: { products: [] },
@@ -444,7 +476,7 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
     'payment.mode': 'demo',
   }).lean();
   const url = `/orders/${order._id}/invoice`;
-  assert.equal(order.invoiceKey, `invoices/${order._id}.pdf`);
+  const invoiceKey = `invoices/${order._id}.pdf`;
   assert.equal(order.products[0].name, 'Test Milk');
   const download = await fetch(base + url, { headers: { Cookie: customerCookie } });
   assert.equal(download.status, 200);
@@ -462,7 +494,7 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
     const stored = await client.send(
       new GetObjectCommand({
         Bucket: process.env['S3_BUCKET'] || 'product-images',
-        Key: order.invoiceKey,
+        Key: invoiceKey,
       }),
     );
     assert.equal(stored.ContentType, 'application/pdf');
@@ -477,7 +509,7 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
     const head = await client.send(
       new HeadObjectCommand({
         Bucket: process.env['S3_BUCKET'] || 'product-images',
-        Key: order.invoiceKey,
+        Key: invoiceKey,
       }),
     );
     assert.equal(head.ETag, stored.ETag);
@@ -488,11 +520,11 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
   assert.deepEqual((await request(url, { cookie: adminCookie, status: 403 })).body, {
     success: false,
   });
-  await request('/sign-up', {
+  await request('/api/auth/signup', {
     method: 'POST',
     body: { ...registration, id: '222333444', email: 'other@example.com' },
   });
-  const login = await request('/login', {
+  const login = await request('/api/auth/login', {
     method: 'POST',
     body: { username: 'other@example.com', password },
   });
@@ -506,7 +538,7 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
   const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
   const form = new FormData();
   form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
-  const upload = await fetch(base + '/upload-product-image', {
+  const upload = await fetch(base + '/api/products/images', {
     method: 'POST',
     headers: await csrfHeaders(adminCookie),
     body: form,
@@ -534,14 +566,14 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
 });
 
 test('logout expires the browser session cookie and rejects the revoked session', async () => {
-  const logout = await request('/logout', { method: 'POST', cookie: customerCookie });
+  const logout = await request('/api/auth/logout', { method: 'POST', cookie: customerCookie });
   assert.equal(logout.body.success, true);
   assert.ok(logout.cookie, 'Logout must expire the session cookie');
   assert.match(logout.cookie, /SESSIONID=;/);
   assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
-  assert.equal((await request('/reconect', { status: 401 })).body.success, false);
+  assert.equal((await request('/api/auth/session', { status: 401 })).body.success, false);
   assert.equal(
-    (await request('/reconect', { cookie: customerCookie, status: 401 })).body.success,
+    (await request('/api/auth/session', { cookie: customerCookie, status: 401 })).body.success,
     false,
   );
 });
@@ -554,12 +586,12 @@ test('only administrators can delete products and deletion persists in MongoDB',
     image: '/products/edam.png',
   });
   const body = { id: String(product._id) };
-  const login = await request('/login', {
+  const login = await request('/api/auth/login', {
     method: 'POST',
     body: { username: registration.email, password },
   });
   const activeCustomerCookie = login.cookie!.split(';')[0];
-  await request('/delete-product', {
+  await request('/api/products/delete', {
     method: 'POST',
     body,
     cookie: activeCustomerCookie,
@@ -567,14 +599,16 @@ test('only administrators can delete products and deletion persists in MongoDB',
   });
   assert.ok(await Product.findById(product._id));
   assert.equal(
-    (await request('/delete-product', { method: 'POST', body, cookie: adminCookie })).body.success,
+    (await request('/api/products/delete', { method: 'POST', body, cookie: adminCookie })).body
+      .success,
     true,
   );
   assert.equal(await Product.findById(product._id), null);
-  const catalog = (await request('/get-all-products', { cookie: adminCookie })).body;
+  const catalog = (await request('/api/products', { cookie: adminCookie })).body;
   assert.ok(!catalog.products.some((item: { id: string }) => item.id === body.id));
   assert.equal(
-    (await request('/delete-product', { method: 'POST', body, cookie: adminCookie })).body.success,
+    (await request('/api/products/delete', { method: 'POST', body, cookie: adminCookie })).body
+      .success,
     false,
   );
 });

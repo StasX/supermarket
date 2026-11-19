@@ -97,7 +97,7 @@ export class SignupPage {
     try {
       const { confirm: _confirm, ...account } = this.account.getRawValue();
       const result = await this.api.signup({ ...account, ...this.details.getRawValue() });
-      if (result.created) {
+      if (result.success) {
         await this.router.navigateByUrl('/login');
       } else {
         this.error.set(result.reason ?? 'Unable to create your account.');

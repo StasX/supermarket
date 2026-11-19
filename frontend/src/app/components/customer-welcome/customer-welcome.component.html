@@ -36,9 +36,9 @@
     <p class="total">Total: {{ cart.total() | currency: 'USD' }}</p>
   } @else if (lastOrder(); as order) {
     <h2>Your latest order</h2>
-    <p>Order {{ order._id }}</p>
-    @if (order.created_at) {
-      <p>Ordered {{ order.created_at | date: 'medium' }}.</p>
+    <p>Order {{ order.id }}</p>
+    @if (order.createdAt) {
+      <p>Ordered {{ order.createdAt | date: 'medium' }}.</p>
     }
     @if (order.products?.length) {
       <table>
@@ -62,8 +62,8 @@
         </tbody>
       </table>
     }
-    @if (order.price !== undefined) {
-      <p class="total">Total: {{ order.price | currency: 'USD' }}</p>
+    @if (order.total !== undefined) {
+      <p class="total">Total: {{ order.total | currency: 'USD' }}</p>
     }
   } @else {
     <p>Your next shopping trip starts here.</p>
