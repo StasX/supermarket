@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import mongoose from 'mongoose';
+import { isObjectId } from '../validators/object-id';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ImageStorageService } from './image-storage.service';
 import { createInvoice } from '../utils/invoice';
@@ -12,7 +12,7 @@ export class InvoiceService {
   ) {}
 
   async download(user: { id: number }, id: string) {
-    if (!mongoose.isObjectIdOrHexString(id)) {
+    if (!isObjectId(id)) {
       throw new NotFoundException();
     }
     const order = await this.models.orders.findOne({

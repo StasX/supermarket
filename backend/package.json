@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "npm run build && node ./dist/main.js",
     "start:prod": "node ./dist/main.js",
+    "db:indexes": "node ./dist/database/migrate-indexes.js",
     "test": "npm run build && npm run build:tests && node --experimental-vm-modules node_modules/jest/bin/jest.js --config dist/jest.config.js --runInBand",
     "test:backend": "npm test",
     "test:integration": "npm run build && npm run build:tests && node --test --test-concurrency=1 tests-dist/integration.test.js",

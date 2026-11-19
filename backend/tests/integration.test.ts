@@ -18,6 +18,7 @@ const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
+const { connectDatabase, provisionDatabaseIndexes } = require('../dist/database/database');
 const { AuthRateLimitStore } = require('../dist/stores/auth-rate-limit.store');
 
 test('Redis rate limits are atomic across replicas and expire without extending the window', async () => {
@@ -102,14 +103,14 @@ before(
       uri && /^mongodb:\/\/[^/]+\/shop_integration(?:\?|$)/.test(uri),
       'MONGODB_URI must point to a dedicated shop_integration database',
     );
-    await mongoose.connect(uri);
-    await Promise.all([User.init(), Product.init(), Cart.init(), Order.init()]);
+    await connectDatabase(uri);
     await Promise.all([
       User.deleteMany({}),
       Product.deleteMany({}),
       Cart.deleteMany({}),
       Order.deleteMany({}),
     ]);
+    await provisionDatabaseIndexes();
     await User.create({
       id: 987654321,
       username: 'admin@example.com',
@@ -399,13 +400,16 @@ test('concurrent cart creation allows one open cart while preserving closed cart
 test('checkout saves shipping and demo payment once, closes the cart, and survives retries', async () => {
   const cart = await Cart.findOne({ user_id: Number(registration.id), status: 1 });
   const product = await Product.findOne({});
-  // Simulate a stale price already stored in MongoDB outside the validated model writes.
-  await Cart.collection.updateOne(
+  // The cart still has the unit price the customer saw before the catalog changed.
+  const reviewedItems = [{ id: String(product._id), count: 2, unitPriceCents: 425 }];
+  await Cart.updateOne(
     { _id: cart._id },
-    { $set: { products: [{ id: String(product._id), count: 2, price: -1 }] } },
+    { $set: { products: [{ id: String(product._id), count: 2, price: 4.25 }] } },
+    { runValidators: true },
   );
   const body = {
     cartId: String(cart._id),
+    reviewedItems,
     shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
     payment: { method: 'credit_card', last4: '4242' },
     total: 0.01,
@@ -431,10 +435,22 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
     ).body.success,
     false,
   );
+  const priceChange = await request('/api/orders/checkout', {
+    method: 'POST',
+    cookie: customerCookie,
+    body,
+  });
+  assert.equal(priceChange.body.success, false);
+  assert.equal(priceChange.body.review.products[0].price, product.price);
+  assert.equal(await Order.countDocuments({ cart_id: body.cartId }), 0);
   assert.equal((await Cart.findById(cart._id)).status, 1);
+  const confirmed = {
+    ...body,
+    reviewedItems: [{ ...reviewedItems[0], unitPriceCents: Math.round(product.price * 100) }],
+  };
   const results = await Promise.all(
     Array.from({ length: 5 }, () =>
-      request('/api/orders/checkout', { method: 'POST', cookie: customerCookie, body }),
+      request('/api/orders/checkout', { method: 'POST', cookie: customerCookie, body: confirmed }),
     ),
   );
   assert.ok(results.every((result) => result.body.success));
@@ -455,7 +471,7 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
   const repeated = await request('/api/orders/checkout', {
     method: 'POST',
     cookie: customerCookie,
-    body,
+    body: confirmed,
   });
   assert.equal(repeated.body.order.id, String(order._id));
   assert.equal(
@@ -534,35 +550,64 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
   assert.equal(publicAttempt.status, 404);
 });
 
-test('administrator uploads persist in MinIO and are publicly served by the app', async () => {
+test('product images are stored, served, replaced and deleted with their product', async () => {
   const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
-  const form = new FormData();
-  form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
-  const upload = await fetch(base + '/api/products/images', {
-    method: 'POST',
-    headers: await csrfHeaders(adminCookie),
-    body: form,
-    signal: AbortSignal.timeout(5000),
-  });
-  assert.equal(upload.status, 200);
-  const result = await upload.json();
-  assert.match(result.image, /^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  const product = { name: 'Uploaded image product', category: 'Milk & Eggs', price: '5.00' };
+  const save = async (id?: string) => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(product)) form.append(key, value);
+    if (id) form.append('id', id);
+    form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
+    const response = await fetch(base + (id ? '/api/products/update' : '/api/products/create'), {
+      method: 'POST',
+      headers: await csrfHeaders(adminCookie),
+      body: form,
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).success, true);
+    return Product.findOne({ name: product.name }).orFail();
+  };
+  const created = await save();
+  assert.match(created.image, /^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  const originalImage = await fetch(base + created.image, { signal: AbortSignal.timeout(5000) });
+  assert.equal(originalImage.status, 200);
+  assert.equal(originalImage.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await originalImage.arrayBuffer()), bytes);
   const client = createStorageClient();
-  try {
-    const object = await client.send(
+  const head = (url: string) =>
+    client.send(
       new HeadObjectCommand({
         Bucket: process.env['S3_BUCKET'] || 'product-images',
-        Key: result.image.split('/').pop(),
+        Key: url.split('/').pop(),
       }),
     );
-    assert.equal(object.ContentLength, bytes.length);
+  try {
+    assert.equal((await head(created.image)).ContentLength, bytes.length);
+    const updated = await save(String(created._id));
+    assert.notEqual(updated.image, created.image);
+    const missing = (error: any) => error.$metadata?.httpStatusCode === 404;
+    await assert.rejects(head(created.image), missing);
+    assert.equal((await head(updated.image)).ContentLength, bytes.length);
+    assert.equal(
+      (await fetch(base + created.image, { signal: AbortSignal.timeout(5000) })).status,
+      404,
+    );
+
+    const deleted = await request('/api/products/delete', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { id: String(created._id) },
+    });
+    assert.equal(deleted.body.success, true);
+    await assert.rejects(head(updated.image), missing);
+    assert.equal(
+      (await fetch(base + updated.image, { signal: AbortSignal.timeout(5000) })).status,
+      404,
+    );
   } finally {
     client.destroy();
   }
-  const image = await fetch(base + result.image, { signal: AbortSignal.timeout(5000) });
-  assert.equal(image.status, 200);
-  assert.equal(image.headers.get('content-type'), 'image/png');
-  assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
 });
 
 test('logout expires the browser session cookie and rejects the revoked session', async () => {

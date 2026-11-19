@@ -29,7 +29,14 @@
       [disabled]="saving()"
       (autofill)="autofill($event)"
     ></fieldset>
-    <p class="total">Total: {{ cart.total() | currency: 'USD' }}</p>
+    <ul aria-label="Reviewed items">
+      @for (item of reviewedLines(); track item.id) {
+      <li>
+        {{ item.name }} × {{ item.count }} at {{ item.unitPriceCents / 100 | currency: 'USD' }} each
+      </li>
+      }
+    </ul>
+    <p class="total">Total: {{ reviewedTotal() | currency: 'USD' }}</p>
     <div class="actions">
       <button type="submit" [disabled]="saving() || cart.busy()">
         {{ saving() ? 'Placing order…' : 'Order' }}

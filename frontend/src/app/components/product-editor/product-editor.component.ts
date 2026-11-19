@@ -104,20 +104,15 @@ export class ProductEditorComponent implements OnDestroy {
     this.error.set('');
     this.saved.set(false);
     try {
-      if (this.selectedFile) {
-        const upload = await this.api.uploadProductImage(this.selectedFile);
-        if (!upload.success || !upload.image) {
-          throw new Error('Image was not uploaded. Please try again.');
-        }
-        this.form.controls.image.setValue(upload.image);
-        this.clearSelection();
-      }
       const values = this.form.getRawValue();
-      const result = await this.api.saveProduct({
-        ...values,
-        price: Number(values.price),
-        ...(this.editing ? { id: this.editing } : {}),
-      });
+      const result = await this.api.saveProduct(
+        {
+          ...values,
+          price: Number(values.price),
+          ...(this.editing ? { id: this.editing } : {}),
+        },
+        this.selectedFile,
+      );
       if (!result.success) {
         throw new Error('Product was not saved. Check for a duplicate product name.');
       }

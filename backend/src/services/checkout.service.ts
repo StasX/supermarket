@@ -1,11 +1,9 @@
-import { CheckoutInput, OrderSnapshot, UserRecord, record } from '../types/contracts';
+import { CheckoutInput, OrderSnapshot, UserRecord } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ProductsService } from './products.service';
-
-const isValidProductOrCartId = (id: unknown): id is string =>
-  typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
+import { matchesReviewedItems, validateCheckout } from '../validators/checkout.validator';
 
 function orderResponse(order: OrderSnapshot & { _id: unknown }) {
   return {
@@ -47,50 +45,9 @@ export class CheckoutService {
 
   async checkout(user: Pick<UserRecord, 'id' | 'username'>, body: CheckoutInput) {
     const fail = (reason: string) => ({ success: false, reason });
-    if (!isValidProductOrCartId(body?.cartId)) {
-      return fail('Choose an open cart.');
-    }
-    const cartId = body.cartId.toLowerCase();
-    const shipping = record(body.shipping);
-    const payment = record(body.payment);
-    if (
-      !shipping ||
-      ![shipping['city'], shipping['street']].every(
-        (value) =>
-          typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 150,
-      )
-    ) {
-      return fail('Enter a city and street (up to 150 characters each).');
-    }
-    if (typeof shipping['city'] !== 'string' || typeof shipping['street'] !== 'string')
-      return fail('Enter a city and street.');
-    const date =
-      typeof shipping['date'] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(shipping['date'])
-        ? new Date(`${shipping['date']}T00:00:00Z`)
-        : new Date(NaN);
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Jerusalem',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date());
-    if (
-      typeof shipping['date'] !== 'string' ||
-      !Number.isFinite(date.getTime()) ||
-      date.toISOString().slice(0, 10) !== shipping['date'] ||
-      shipping['date'] < today
-    ) {
-      return fail('Choose today or a future shipping date.');
-    }
-    // Demo payments accept only last-four metadata, never card numbers or CVC.
-    if (
-      payment['method'] !== 'credit_card' ||
-      typeof payment['last4'] !== 'string' ||
-      !/^[0-9]{4}$/.test(payment['last4']) ||
-      Object.keys(payment).some((key) => !['method', 'last4'].includes(key))
-    ) {
-      return fail('Use the demo credit card. No charge will be made.');
-    }
+    const input = validateCheckout(body);
+    if (!input.success) return input;
+    const { cartId, shipping, payment, reviewedItems } = input;
     let cart = await this.models.carts.findOne({ _id: cartId, user_id: user.id });
     if (!cart) {
       return fail('Cart not found.');
@@ -107,14 +64,20 @@ export class CheckoutService {
       if (!Number.isSafeInteger(totalCents)) {
         return fail('The order total is too large.');
       }
+      if (!matchesReviewedItems(reviewedItems, products)) {
+        return {
+          ...fail('Your cart items or prices changed. Review the updated order before placing it.'),
+          review: { products },
+        };
+      }
       const snapshot = {
         user_id: user.id,
         username: user.username,
         cart_id: String(cart._id),
         products,
         price: totalCents / 100,
-        shipping: { city: shipping['city'].trim(), street: shipping['street'].trim(), date },
-        payment: { mode: 'demo', method: 'credit_card', last4: payment['last4'] },
+        shipping,
+        payment,
         created_at: new Date(),
       };
       // Persist the order snapshot and close the cart atomically. Matching products
@@ -128,6 +91,9 @@ export class CheckoutService {
     }
     if (cart?.status !== 0 || !cart.checkout) {
       return fail('Your cart changed. Review it and try again.');
+    }
+    if (!matchesReviewedItems(reviewedItems, cart.checkout.products)) {
+      return fail('This cart was already checked out with different items or prices.');
     }
     const query = { cart_id: cartId, 'payment.mode': 'demo' };
     let order;

@@ -158,14 +158,17 @@ describe('API compatibility', () => {
       document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/';
     }
   });
-  it('uploads an image as multipart form data', async () => {
+  it('saves the product and image in one multipart request', async () => {
     const file = new File(['image'], 'cheese.png', { type: 'image/png' });
-    const promise = TestBed.inject(ApiService).uploadProductImage(file);
-    const request = TestBed.inject(HttpTestingController).expectOne('/api/products/images');
+    const promise = TestBed.inject(ApiService).saveProduct(product, file);
+    const request = TestBed.inject(HttpTestingController).expectOne('/api/products/update');
     expect(request.request.body.get('image')).toBe(file);
+    expect(request.request.body.get('name')).toBe(product.name);
+    expect(request.request.body.get('id')).toBe(product.id);
+    expect(request.request.body.get('price')).toBe('10.50');
     expect(request.request.headers.has('Content-Type')).toBe(false);
-    request.flush({ success: true, image: '/products/test.png' });
-    expect((await promise).image).toBe('/products/test.png');
+    request.flush({ success: true });
+    expect(await promise).toEqual({ success: true });
   });
   it('returns the catalog product shape for category results', async () => {
     const promise = TestBed.inject(ApiService).products('Wine & Drinks');
@@ -695,6 +698,7 @@ describe('demo checkout', () => {
     const request = TestBed.inject(HttpTestingController).expectOne('/api/orders/checkout');
     expect(request.request.body).toEqual({
       cartId: 'c1',
+      reviewedItems: [{ id: 'p1', count: 2, unitPriceCents: 1050 }],
       shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
       payment: { method: 'credit_card', last4: '4242' },
     });
@@ -764,6 +768,33 @@ describe('demo checkout', () => {
     expect(page.cart.id()).toBe('c1');
     expect(page.error()).toBe('Cart changed');
     expect(page.completed()).toBeNull();
+  });
+  it('shows an updated price and submits it only after the customer orders again', async () => {
+    const fixture = TestBed.createComponent(CheckoutPage);
+    const page = setup(fixture);
+    vi.spyOn(page.cart, 'load').mockResolvedValue();
+    const http = TestBed.inject(HttpTestingController);
+    const pending = page.submit();
+    http.expectOne('/api/orders/checkout').flush({
+      success: false,
+      reason: 'Review updated prices.',
+      review: { products: [{ id: 'p1', name: 'Juice', count: 2, price: 12 }] },
+    });
+    await pending;
+    expect(page.completed()).toBeNull();
+    expect(page.form.controls.city.value).toBe('Tel Aviv');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('$12.00 each');
+    expect(fixture.nativeElement.textContent).toContain('Total: $24.00');
+    http.expectNone('/api/orders/checkout');
+
+    const retry = page.submit();
+    const updated = http.expectOne('/api/orders/checkout');
+    expect(updated.request.body.reviewedItems).toEqual([
+      { id: 'p1', count: 2, unitPriceCents: 1200 },
+    ]);
+    updated.flush({ success: false, reason: 'Test response' });
+    await retry;
   });
 });
 

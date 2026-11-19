@@ -1,6 +1,6 @@
 services:
   app:
-    build:
+    build: &backend-build
       context: .
       dockerfile: Dockerfile
     ports:
@@ -17,11 +17,22 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      mongodb:
-        condition: service_healthy
+      db-indexes:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
     restart: unless-stopped
+
+  db-indexes:
+    build: *backend-build
+    command: ['node', 'dist/database/migrate-indexes.js']
+    environment:
+      MONGODB_URI: ${MONGODB_URI}
+    healthcheck:
+      disable: true
+    depends_on:
+      mongodb:
+        condition: service_healthy
 
   redis:
     build:

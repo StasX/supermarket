@@ -16,7 +16,10 @@ export class CartService {
   readonly lines = computed(() =>
     this.items().map((item) => ({
       ...item,
-      name: this.catalog().find((product) => product.id === item.id)?.name ?? 'Unavailable product',
+      name:
+        item.name ??
+        this.catalog().find((product) => product.id === item.id)?.name ??
+        'Unavailable product',
     })),
   );
 
