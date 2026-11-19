@@ -1,5 +1,6 @@
 import { LoginInput, SignupInput, CookieResponse, record } from '../types/contracts';
 import { HttpException, Inject, Injectable } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compare, hash } from 'bcryptjs';
@@ -12,7 +13,7 @@ const jwt = require('jsonwebtoken') as {
   sign(
     payload: { returning: boolean },
     key: Buffer,
-    options: { subject: string; expiresIn: string; algorithm: string },
+    options: { subject: string; expiresIn: string; algorithm: string; jwtid: string },
   ): string;
 };
 
@@ -35,6 +36,10 @@ export class AuthService {
     }
     try {
       const payload = record(jwt.verify(token, this.key(), { algorithms: ['HS256'] }) as unknown);
+      const id = createHash('sha256')
+        .update(token.slice(0, token.lastIndexOf('.')))
+        .digest('hex');
+      if (await this.models.revokedSessions.exists({ _id: id })) return null;
       // Accept existing sessions during the migration, but issue minimal new tokens.
       let user;
       if (typeof payload['sub'] === 'string') {
@@ -56,13 +61,30 @@ export class AuthService {
       if (!user) {
         return null;
       }
+      const expiration = payload['exp'];
+      const expiresAt =
+        typeof expiration === 'number' ? new Date(Math.ceil(expiration) * 1000) : null;
       return {
-        ...(user.toObject?.() ?? user),
-        isReturning: typeof payload['returning'] === 'boolean' ? payload['returning'] : true,
+        session: {
+          id,
+          expiresAt: expiresAt && Number.isFinite(expiresAt.getTime()) ? expiresAt : null,
+        },
+        user: {
+          ...(user.toObject?.() ?? user),
+          isReturning: typeof payload['returning'] === 'boolean' ? payload['returning'] : true,
+        },
       };
     } catch {
       return null;
     }
+  }
+
+  async revoke(session: { id: string; expiresAt: Date | null }) {
+    await this.models.revokedSessions.updateOne(
+      { _id: session.id },
+      { $setOnInsert: { expiresAt: session.expiresAt } },
+      { upsert: true },
+    );
   }
 
   async login(body: LoginInput, response: CookieResponse) {
@@ -86,6 +108,7 @@ export class AuthService {
       subject: String(user._id),
       expiresIn: '9h',
       algorithm: 'HS256',
+      jwtid: randomUUID(),
     });
     response.cookie('SESSIONID', token, {
       httpOnly: true,

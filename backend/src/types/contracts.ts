@@ -30,6 +30,7 @@ export type SessionUser = UserRecord & { isReturning: boolean };
 export interface SessionRequest extends IncomingMessage {
   cookies?: { SESSIONID?: unknown; 'XSRF-TOKEN'?: unknown };
   user_data: SessionUser;
+  authSession: { id: string; expiresAt: Date | null };
 }
 export interface CookieOptions {
   httpOnly?: boolean;

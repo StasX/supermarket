@@ -533,13 +533,17 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
   assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
 });
 
-test('logout expires the browser session cookie', async () => {
+test('logout expires the browser session cookie and rejects the revoked session', async () => {
   const logout = await request('/logout', { method: 'POST', cookie: customerCookie });
   assert.equal(logout.body.success, true);
   assert.ok(logout.cookie, 'Logout must expire the session cookie');
   assert.match(logout.cookie, /SESSIONID=;/);
   assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
   assert.equal((await request('/reconect', { status: 401 })).body.success, false);
+  assert.equal(
+    (await request('/reconect', { cookie: customerCookie, status: 401 })).body.success,
+    false,
+  );
 });
 
 test('only administrators can delete products and deletion persists in MongoDB', async () => {

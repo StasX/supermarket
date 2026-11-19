@@ -112,7 +112,11 @@ export class ApiController {
 
   @Post('logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) response: CookieResponse) {
+  async logout(
+    @Req() request: SessionRequest,
+    @Res({ passthrough: true }) response: CookieResponse,
+  ) {
+    await this.auth.revoke(request.authSession);
     response.clearCookie('SESSIONID', { path: '/' });
     this.csrf.issue(response);
     return { success: true };

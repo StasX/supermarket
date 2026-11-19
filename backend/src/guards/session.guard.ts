@@ -24,15 +24,17 @@ export class SessionGuard implements CanActivate {
       return true;
     }
     const request = context.switchToHttp().getRequest<SessionRequest>();
-    const user = await this.auth.authenticate(request.cookies?.SESSIONID);
+    const authenticated = await this.auth.authenticate(request.cookies?.SESSIONID);
     const role = this.reflector.get('role', context.getHandler());
-    if (!user) {
+    if (!authenticated) {
       throw new HttpException({ success: false }, 401);
     }
+    const { user, session } = authenticated;
     if (role !== undefined && user.role !== role) {
       throw new HttpException({ success: false }, 403);
     }
     request.user_data = user;
+    request.authSession = session;
     return true;
   }
 }
