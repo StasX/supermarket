@@ -12,9 +12,11 @@ import {
 } from '../validators/product.validator';
 import { ImageStorageService } from './image-storage.service';
 
-const uploadedImagePrefix = '/products/uploads/';
-const uploadedFilenamePattern =
-  /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(?:png|jpg|webp)$/;
+import {
+  ProductImageCleanupService,
+  uploadedFilenamePattern,
+  uploadedImagePrefix,
+} from './product-image-cleanup.service';
 
 interface ProductImageUpload {
   bytes: Buffer;
@@ -40,6 +42,7 @@ export class ProductsService {
   constructor(
     @Inject(MODELS) private readonly models: DatabaseModels,
     private readonly images: ImageStorageService,
+    private readonly imageCleanup: ProductImageCleanupService,
   ) {}
 
   async productImage(filename: string) {
@@ -112,7 +115,7 @@ export class ProductsService {
         const contentType = upload.extension === 'jpg' ? 'image/jpeg' : `image/${upload.extension}`;
         await this.images.put(filename, upload.bytes, contentType);
       } catch (error) {
-        await this.removeUploadedImage(uploadedImagePrefix + filename);
+        await this.imageCleanup.remove(uploadedImagePrefix + filename);
         throw error;
       }
     }
@@ -137,9 +140,9 @@ export class ProductsService {
               { $set: product },
               { returnDocument: 'before', runValidators: true },
             );
-        if (!previous && filename) await this.removeUploadedImage(product.image);
+        if (!previous && filename) await this.imageCleanup.remove(product.image);
         if (previous && product.image !== undefined && previous.image !== product.image) {
-          await this.removeUploadedImage(previous.image);
+          await this.imageCleanup.remove(previous.image);
         }
         return { success: Boolean(previous) };
       }
@@ -147,12 +150,12 @@ export class ProductsService {
       return { success: true };
     } catch (error) {
       if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
-        if (filename) await this.removeUploadedImage(product.image);
+        if (filename) await this.imageCleanup.remove(product.image);
         return { success: false };
       }
       if (filename) {
         if (error instanceof mongoose.Error.ValidationError) {
-          await this.removeUploadedImage(product.image);
+          await this.imageCleanup.remove(product.image);
         } else {
           // A lost database acknowledgement may still have committed the image reference.
           this.logger.warn(`Could not confirm the product save for image ${filename}`);
@@ -165,21 +168,8 @@ export class ProductsService {
   async deleteProduct(body: Pick<ProductInput, 'id'>) {
     if (!isObjectId(body?.id)) return { success: false };
     const deleted = await this.models.products.findByIdAndDelete(body.id);
-    if (deleted) await this.removeUploadedImage(deleted.image);
+    if (deleted) await this.imageCleanup.remove(deleted.image);
     return { success: Boolean(deleted) };
-  }
-
-  private async removeUploadedImage(image?: string | null) {
-    if (!image?.startsWith(uploadedImagePrefix)) return;
-    const filename = image.slice(uploadedImagePrefix.length);
-    if (!uploadedFilenamePattern.test(filename)) return;
-    try {
-      // Once detached, a managed URL cannot be attached again through a product save.
-      if (await this.models.products.exists({ image })) return;
-      await this.images.deleteProductImage(filename);
-    } catch {
-      this.logger.error(`Could not delete unused product image ${filename}`);
-    }
   }
 
   async count() {

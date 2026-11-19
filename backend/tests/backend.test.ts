@@ -40,6 +40,7 @@ const Product = require('../dist/models/Product');
 const RevokedSession = require('../dist/models/RevokedSession');
 const User = require('../dist/models/User');
 const { ImageStorageService } = require('../dist/services/image-storage.service');
+const { ProductImageCleanupService } = require('../dist/services/product-image-cleanup.service');
 const { CheckoutService } = require('../dist/services/checkout.service');
 const { createInvoice } = require('../dist/utils/invoice');
 const { CsrfService } = require('../dist/services/csrf.service');
@@ -102,12 +103,14 @@ const customer = {
 const admin = { ...customer, _id: '507f1f77bcf86cd799439012', role: 1 };
 const key = 'test-only-session-signing-key';
 let app: INestApplication;
-type Collection = 'users' | 'products' | 'carts' | 'orders' | 'revokedSessions';
+type Collection =
+  'users' | 'products' | 'carts' | 'orders' | 'revokedSessions' | 'productImageDeletions';
 type ModelMethod =
   | 'aggregate'
   | 'find'
   | 'findOne'
   | 'create'
+  | 'deleteOne'
   | 'countDocuments'
   | 'findByIdAndUpdate'
   | 'findByIdAndDelete'
@@ -778,23 +781,26 @@ beforeAll(async () => {
   process.env['JWT_KEY_PATH'] = path.join(directory, 'session.key');
   fs.writeFileSync(process.env['JWT_KEY_PATH'], key);
   models = Object.fromEntries(
-    ['users', 'products', 'orders', 'carts', 'revokedSessions'].map((name) => [
-      name,
-      Object.fromEntries(
-        [
-          'aggregate',
-          'find',
-          'findOne',
-          'create',
-          'countDocuments',
-          'findByIdAndUpdate',
-          'findByIdAndDelete',
-          'findOneAndUpdate',
-          'exists',
-          'updateOne',
-        ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
-      ),
-    ]),
+    ['users', 'products', 'orders', 'carts', 'revokedSessions', 'productImageDeletions'].map(
+      (name) => [
+        name,
+        Object.fromEntries(
+          [
+            'aggregate',
+            'find',
+            'findOne',
+            'create',
+            'deleteOne',
+            'countDocuments',
+            'findByIdAndUpdate',
+            'findByIdAndDelete',
+            'findOneAndUpdate',
+            'exists',
+            'updateOne',
+          ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
+        ),
+      ],
+    ),
   ) as MockModels;
   Object.assign(models.orders, { collection: { name: 'orders' } });
   models.carts.aggregate.mockResolvedValue([]);
@@ -1117,6 +1123,38 @@ test('cleanup preserves an image that still has a product reference', async () =
   expect(result.body).toEqual({ success: true });
   expect(models.products.exists).toHaveBeenCalledWith({ image });
   expect(images.has(filename)).toBe(true);
+});
+
+test('failed image cleanup is queued and a later retry removes the object and job', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  images.set(filename, Buffer.from('old image'));
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image });
+  const storage = app.get(ImageStorageService);
+  const remove = jest
+    .spyOn(storage, 'deleteProductImage')
+    .mockRejectedValueOnce(new Error('Unavailable'));
+  try {
+    const response = await api()
+      .post('/api/products/delete')
+      .set('Cookie', cookie(admin))
+      .send({ id: customer._id })
+      .expect(200);
+    expect(response.body).toEqual({ success: true });
+    const queue = models.productImageDeletions;
+    expect(queue.updateOne).toHaveBeenCalledWith(
+      { _id: filename },
+      { $setOnInsert: { nextAttemptAt: expect.any(Date) } },
+      { upsert: true, runValidators: true },
+    );
+    expect(images.has(filename)).toBe(true);
+    queue.findOneAndUpdate.mockResolvedValueOnce({ _id: filename, attempts: 1 });
+    await app.get(ProductImageCleanupService).retryPending();
+    expect(queue.deleteOne).toHaveBeenCalledWith({ _id: filename, attempts: 1 });
+    expect(images.has(filename)).toBe(false);
+  } finally {
+    remove.mockRestore();
+  }
 });
 
 test('an existing upload can only be retained by the product that owns it', async () => {

@@ -331,7 +331,7 @@ For `/api/products/update`, include an additional `id` field containing the prod
 
 #### Upload a product image
 
-To attach a file, send the product fields and an `image` file (PNG, JPEG, or WebP, up to 5 MB) as multipart form data to `POST /api/products/create` or `POST /api/products/update`. Include `id` for updates. The saved upload URL appears in the catalog. A JSON update can keep the product's current upload by sending its existing URL or omitting the image field. Replacing an upload or deleting its product removes the old object. Bundled images and external URLs are supported as JSON image values.
+To attach a file, send the product fields and an `image` file (PNG, JPEG, or WebP, up to 5 MB) as multipart form data to `POST /api/products/create` or `POST /api/products/update`. Include `id` for updates. The saved upload URL appears in the catalog. A JSON update can keep the product's current upload by sending its existing URL or omitting the image field. Replacing an upload or deleting its product removes the old object. Failed deletions are queued in MongoDB and retried after restart with increasing delays. Each retry checks for product references before deleting the object. Bundled images and external URLs are supported as JSON image values.
 
 #### Find a product
 

@@ -4,6 +4,7 @@ import Product = require('../models/Product');
 import Cart = require('../models/Cart');
 import Order = require('../models/Order');
 import RevokedSession = require('../models/RevokedSession');
+import ProductImageDeletion = require('../models/ProductImageDeletion');
 
 export const databaseModels = {
   users: User,
@@ -11,6 +12,7 @@ export const databaseModels = {
   carts: Cart,
   orders: Order,
   revokedSessions: RevokedSession,
+  productImageDeletions: ProductImageDeletion,
 };
 
 export type DatabaseModels = typeof databaseModels;
