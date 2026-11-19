@@ -39,46 +39,46 @@ export class ProductsController {
     return new StreamableFile(stream, { type });
   }
 
-  @Get('get-all-products')
+  @Get('api/products')
   products() {
     return this.productsService.products();
   }
 
-  @Post('get-products-by-category')
+  @Post('api/products/by-category')
   @HttpCode(200)
   category(@Body() body: CategoryInput) {
     return this.productsService.category(body);
   }
 
-  @Post('find-product')
+  @Post('api/products/search')
   @HttpCode(200)
   find(@Body() body: SearchInput) {
     return this.productsService.find(body);
   }
 
   @Role(1)
-  @Post('add-product')
+  @Post('api/products/create')
   @HttpCode(200)
   add(@Body() body: ProductInput) {
     return this.productsService.saveProduct(body);
   }
 
   @Role(1)
-  @Post('edit-product')
+  @Post('api/products/update')
   @HttpCode(200)
   edit(@Body() body: ProductInput) {
     return this.productsService.saveProduct(body, true);
   }
 
   @Role(1)
-  @Post('delete-product')
+  @Post('api/products/delete')
   @HttpCode(200)
   deleteProduct(@Body() body: ProductInput) {
     return this.productsService.deleteProduct(body);
   }
 
   @Role(1)
-  @Post('upload-product-image')
+  @Post('api/products/images')
   @HttpCode(200)
   @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
   async uploadProductImage(@UploadedFile() file?: { buffer: Buffer }) {
@@ -100,7 +100,7 @@ export class ProductsController {
   }
 
   @Role(0)
-  @Get('total-products')
+  @Get('api/products/count')
   productsCount() {
     return this.productsService.count();
   }

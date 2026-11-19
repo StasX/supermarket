@@ -15,7 +15,7 @@ export class AuthController {
   ) {}
 
   @Public()
-  @Get('csrf-token')
+  @Get('api/auth/csrf-token')
   csrfToken(@Req() request: SessionRequest, @Res({ passthrough: true }) response: CookieResponse) {
     response.setHeader('Cache-Control', 'no-store');
     const session = request.cookies?.SESSIONID;
@@ -24,7 +24,7 @@ export class AuthController {
   }
 
   @Public()
-  @Post('login')
+  @Post('api/auth/login')
   @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
   login(@Body() body: LoginInput, @Res({ passthrough: true }) response: CookieResponse) {
@@ -32,7 +32,7 @@ export class AuthController {
   }
 
   @Public()
-  @Post('check-signup')
+  @Post('api/auth/signup/availability')
   @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
   checkSignup(@Body() body: Pick<SignupInput, 'email' | 'id'>) {
@@ -40,14 +40,14 @@ export class AuthController {
   }
 
   @Public()
-  @Post('sign-up')
+  @Post('api/auth/signup')
   @UseGuards(AuthRateLimitGuard)
   @HttpCode(200)
   signup(@Body() body: SignupInput) {
     return this.auth.signup(body);
   }
 
-  @Post('logout')
+  @Post('api/auth/logout')
   @HttpCode(200)
   async logout(
     @Req() request: SessionRequest,
@@ -59,16 +59,9 @@ export class AuthController {
     return { success: true };
   }
 
-  @Get('reconect')
+  @Get('api/auth/session')
   reconnect(@Req() request: SessionRequest) {
     const user = request.user_data;
-    return {
-      success: true,
-      role: user.role,
-      name: user.name,
-      user: user._id,
-      address: user.address,
-      isReturning: user.isReturning,
-    };
+    return this.auth.sessionProfile(user, user.isReturning);
   }
 }

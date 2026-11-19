@@ -20,12 +20,12 @@ export interface CartItem {
 export interface Cart {
   id: string;
   products: CartItem[];
-  created: string;
+  createdAt: string;
 }
 export interface OrderHistory {
-  _id: string;
-  price?: number;
-  created_at?: string;
+  id: string;
+  total?: number;
+  createdAt?: string;
   products?: (CartItem & { name?: string })[];
 }
 export interface Result {
@@ -42,16 +42,14 @@ export interface CheckoutRequest {
   shipping: { city: string; street: string; date: string };
   payment: { method: 'credit_card'; last4: string };
 }
-export interface CheckoutOrder {
-  id: string;
+export interface CheckoutOrder extends OrderHistory {
   total: number;
-  products?: CartItem[];
   invoiceUrl: string;
   shipping: { city: string; street: string; date: string };
   payment: { mode: 'demo'; method: string; last4: string };
 }
 export interface ProductResult extends Result {
-  products: (Product & { _id?: string })[];
+  products: Product[];
 }
 export interface Signup {
   id: string;

@@ -25,8 +25,12 @@ interface ProductRecord {
   _id: mongoose.Types.ObjectId;
   name: string;
   price: number;
-  image: string;
+  image?: string | null;
   category: string;
+}
+
+function productResponse({ _id, name, price, image, category }: ProductRecord) {
+  return { id: _id, name, price, image: image ?? '', category };
 }
 
 @Injectable()
@@ -37,13 +41,7 @@ export class ProductsService {
     const products: ProductRecord[] = await this.models.products.find({});
     return {
       success: true,
-      products: products.map((product) => ({
-        id: product._id,
-        name: product.name,
-        price: product.price,
-        image: product.image,
-        category: product.category,
-      })),
+      products: products.map(productResponse),
     };
   }
 
@@ -53,7 +51,7 @@ export class ProductsService {
     }
     return {
       success: true,
-      products: await this.models.products.find({ category: body.category }),
+      products: (await this.models.products.find({ category: body.category })).map(productResponse),
     };
   }
 
@@ -65,7 +63,9 @@ export class ProductsService {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return {
       success: true,
-      products: await this.models.products.find({ name: new RegExp(escaped, 'i') }),
+      products: (await this.models.products.find({ name: new RegExp(escaped, 'i') })).map(
+        productResponse,
+      ),
     };
   }
 
@@ -112,7 +112,7 @@ export class ProductsService {
   }
 
   async count() {
-    return { success: true, productsCount: await this.models.products.countDocuments({}) };
+    return { success: true, count: await this.models.products.countDocuments({}) };
   }
 
   async resolveCartProducts(input: unknown, includeNames = false) {

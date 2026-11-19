@@ -1,4 +1,4 @@
-import { CheckoutInput, UserRecord, record } from '../types/contracts';
+import { CheckoutInput, OrderSnapshot, UserRecord, record } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
@@ -6,6 +6,28 @@ import { ProductsService } from './products.service';
 
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
+
+function orderResponse(order: OrderSnapshot & { _id: unknown }) {
+  return {
+    id: order._id,
+    total: order.price,
+    createdAt: order.created_at,
+    products: order.products,
+    shipping: order.shipping
+      ? { city: order.shipping.city, street: order.shipping.street, date: order.shipping.date }
+      : undefined,
+    ...(order.payment?.mode === 'demo'
+      ? {
+          payment: {
+            mode: order.payment.mode,
+            method: order.payment.method,
+            last4: order.payment.last4,
+          },
+          invoiceUrl: `/orders/${order._id}/invoice`,
+        }
+      : {}),
+  };
+}
 
 @Injectable()
 export class CheckoutService {
@@ -15,12 +37,12 @@ export class CheckoutService {
   ) {}
 
   async count() {
-    return { success: true, ordersCount: await this.models.orders.countDocuments({}) };
+    return { success: true, count: await this.models.orders.countDocuments({}) };
   }
 
   async lastOrder(user: Pick<UserRecord, 'id' | 'username'>) {
     const order = await this.models.orders.findOne({ user_id: user.id }).sort({ _id: -1 });
-    return order ? { success: true, order } : { success: true };
+    return { success: true, order: order ? orderResponse(order) : null };
   }
 
   async checkout(user: Pick<UserRecord, 'id' | 'username'>, body: CheckoutInput) {
@@ -122,16 +144,6 @@ export class CheckoutService {
       order = await this.models.orders.findOne(query);
     }
     if (!order) throw new Error('Unable to recover the checkout order.');
-    return {
-      success: true,
-      order: {
-        id: order._id,
-        total: order.price,
-        products: order.products,
-        shipping: order.shipping,
-        payment: order.payment,
-        invoiceUrl: `/orders/${order._id}/invoice`,
-      },
-    };
+    return { success: true, order: orderResponse(order) };
   }
 }

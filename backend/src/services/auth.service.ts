@@ -1,4 +1,4 @@
-import { LoginInput, SignupInput, CookieResponse, record } from '../types/contracts';
+import { LoginInput, SignupInput, CookieResponse, UserRecord, record } from '../types/contracts';
 import { HttpException, Inject, Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -117,6 +117,10 @@ export class AuthService {
       path: '/',
     });
     this.csrf.issue(response, token);
+    return this.sessionProfile(user, isReturning);
+  }
+
+  sessionProfile(user: UserRecord, isReturning: boolean) {
     return {
       success: true,
       role: user.role,
@@ -176,10 +180,10 @@ export class AuthService {
       body.pass.length < 8 ||
       !/^\d{9}$/.test(String(body.id))
     ) {
-      return { created: false, reason: 'one of passed values invalid' };
+      return { success: false, reason: 'one of passed values invalid' };
     }
     const availability = await this.checkSignup({ email: body.email, id: String(body.id) });
-    if (!availability.available) return { created: false, reason: availability.reason };
+    if (!availability.available) return { success: false, reason: availability.reason };
     try {
       await this.models.users.create({
         id: Number(body.id),
@@ -190,15 +194,15 @@ export class AuthService {
         role: 0,
         has_logged_in: false,
       });
-      return { created: true };
+      return { success: true };
     } catch (error) {
       if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
         return {
-          created: false,
+          success: false,
           reason: 'An account with this email or ID number already exists.',
         };
       }
-      return { created: false, reason: 'unexpected error' };
+      return { success: false, reason: 'unexpected error' };
     }
   }
 }

@@ -40,19 +40,19 @@ export class OrdersController {
   }
 
   @Role(0)
-  @Get('total-orders')
+  @Get('api/orders/count')
   ordersCount() {
     return this.checkoutService.count();
   }
 
   @Role(0)
-  @Get('get-last-order')
+  @Get('api/orders/latest')
   lastOrder(@Req() request: SessionRequest) {
     return this.checkoutService.lastOrder(request.user_data);
   }
 
   @Role(0)
-  @Post('checkout')
+  @Post('api/orders/checkout')
   @HttpCode(200)
   checkout(@Req() request: SessionRequest, @Body() body: CheckoutInput) {
     return this.checkoutService.checkout(request.user_data, body);

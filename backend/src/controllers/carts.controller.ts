@@ -10,21 +10,21 @@ export class CartsController {
   constructor(private readonly cartsService: CartsService) {}
 
   @Role(0)
-  @Post('create-cart')
+  @Post('api/carts')
   @HttpCode(200)
   createCart(@Req() request: SessionRequest, @Body() body: CartInput) {
     return this.cartsService.createCart(request.user_data, body);
   }
 
   @Role(0)
-  @Post('update-cart')
+  @Post('api/carts/update')
   @HttpCode(200)
   updateCart(@Req() request: SessionRequest, @Body() body: CartInput) {
     return this.cartsService.updateCart(request.user_data, body);
   }
 
   @Role(0)
-  @Get('get-cart')
+  @Get('api/carts/current')
   cart(@Req() request: SessionRequest) {
     return this.cartsService.cart(request.user_data);
   }
