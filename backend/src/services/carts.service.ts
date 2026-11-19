@@ -17,7 +17,7 @@ export class CartsService {
   ) {}
 
   async createCart(user: Pick<UserRecord, 'id' | 'username'>, body: CartInput) {
-    const products = await this.products.resolveCartProducts(body?.products);
+    const products = await this.products.resolveCartProducts(body?.products, true);
     if (!products) {
       return { success: false };
     }
@@ -27,10 +27,10 @@ export class CartsService {
     try {
       const cart = await this.models.carts.create({
         user_id: user.id,
-        products,
+        products: products.map(({ id, count, price }) => ({ id, count, price })),
         created_at: new Date(),
       });
-      return { success: true, cart: cartResponse(cart) };
+      return { success: true, cart: { ...cartResponse(cart), products } };
     } catch (error) {
       if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
         return { success: false };
@@ -43,20 +43,28 @@ export class CartsService {
     if (!isObjectId(body?.id)) {
       return { success: false };
     }
-    const products = await this.products.resolveCartProducts(body.products);
+    const products = await this.products.resolveCartProducts(body.products, true);
     if (!products) {
       return { success: false };
     }
     const cart = await this.models.carts.findOneAndUpdate(
       { _id: body.id, user_id: user.id, status: 1 },
-      { $set: { products } },
+      { $set: { products: products.map(({ id, count, price }) => ({ id, count, price })) } },
       { returnDocument: 'after', runValidators: true },
     );
-    return cart ? { success: true, cart: cartResponse(cart) } : { success: false };
+    return cart ? { success: true, cart: { ...cartResponse(cart), products } } : { success: false };
   }
 
   async cart(user: Pick<UserRecord, 'id' | 'username'>) {
     const cart = await this.models.carts.findOne({ user_id: user.id, status: 1 });
-    return { success: true, cart: cart ? cartResponse(cart) : null };
+    if (!cart) return { success: true, cart: null };
+    const names = await this.products.productNames(cart.products.map(({ id }) => id));
+    const products = cart.products.map(({ id, count, price }) => ({
+      id,
+      count,
+      price,
+      name: names.get(id),
+    }));
+    return { success: true, cart: { ...cartResponse(cart), products } };
   }
 }

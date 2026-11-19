@@ -109,7 +109,23 @@ export class CheckoutService implements OnModuleInit, OnModuleDestroy {
     const order = await this.models.orders
       .findOne({ user_id: user.id })
       .sort({ created_at: -1, _id: -1 });
-    return { success: true, order: order ? orderResponse(order) : null };
+    if (!order) return { success: true, order: null };
+    const response = orderResponse(order);
+    const names = await this.products.productNames(
+      (response.products ?? []).filter((item) => !item.name).map(({ id }) => id),
+    );
+    return {
+      success: true,
+      order: {
+        ...response,
+        products: response.products?.map(({ id, count, price, name }) => ({
+          id,
+          count,
+          price,
+          name: name || names.get(id),
+        })),
+      },
+    };
   }
 
   async checkout(user: Pick<UserRecord, 'id' | 'username'>, body: CheckoutInput) {

@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
   StreamableFile,
   UploadedFile,
   UseGuards,
@@ -15,7 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { CsrfGuard } from '../guards/csrf.guard';
 import { Public, Role, SessionGuard } from '../guards/session.guard';
 import { ProductsService } from '../services/products.service';
-import { CategoryInput, ProductInput, SearchInput } from '../types/contracts';
+import { CatalogInput, CategoryInput, ProductInput, SearchInput } from '../types/contracts';
 import { productImageExtension } from '../validators/product.validator';
 
 const ProductImageUpload = FileInterceptor('image', {
@@ -40,8 +41,8 @@ export class ProductsController {
   }
 
   @Get('api/products')
-  products() {
-    return this.productsService.products();
+  products(@Query() query: CatalogInput) {
+    return this.productsService.products(query);
   }
 
   @Post('api/products/by-category')

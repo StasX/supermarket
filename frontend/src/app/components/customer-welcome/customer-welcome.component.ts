@@ -20,10 +20,6 @@ export class CustomerWelcome implements OnInit {
   readonly loading = signal(true);
   readonly error = signal('');
 
-  productName(id: string) {
-    return this.cart.catalog().find((product) => product.id === id)?.name ?? 'Unavailable product';
-  }
-
   async ngOnInit() {
     try {
       const [result] = await Promise.all([this.api.lastOrder(), this.cart.load()]);

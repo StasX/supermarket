@@ -52,6 +52,7 @@ export interface CheckoutOrder extends OrderHistory {
 }
 export interface ProductResult extends Result {
   products: Product[];
+  nextCursor: string | null;
 }
 export interface Signup {
   id: string;

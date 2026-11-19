@@ -61,21 +61,25 @@ export class ApiService {
     return firstValueFrom(this.http.post<Result>('/api/auth/logout', {}));
   }
 
-  async products(category = '', search = '') {
+  async products(category = '', search = '', after?: string) {
     const searchTerm = search.trim();
+    const cursor: Record<string, string> = after ? { after } : {};
     let request;
     if (searchTerm) {
-      request = this.http.post<ProductResult>('/api/products/search', { product: searchTerm });
+      request = this.http.post<ProductResult>('/api/products/search', {
+        product: searchTerm,
+        ...cursor,
+      });
     } else if (category) {
-      request = this.http.post<ProductResult>('/api/products/by-category', { category });
+      request = this.http.post<ProductResult>('/api/products/by-category', { category, ...cursor });
     } else {
-      request = this.http.get<ProductResult>('/api/products');
+      request = this.http.get<ProductResult>('/api/products', { params: cursor });
     }
     const result = await firstValueFrom(request);
     if (!result.success) {
       throw new Error('Unable to load products. Please sign in again.');
     }
-    return result.products;
+    return result;
   }
 
   saveProduct(product: Omit<Product, 'id'> & { id?: string }, file?: File | null) {

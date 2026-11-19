@@ -92,7 +92,10 @@ test('customer can shop, change quantities, reload, review, and sign out', async
           cart: exists ? { id: 'c1', products: cart, createdAt: '2026-01-01' } : null,
         };
       if (path === 'api/carts' || path === 'api/carts/update') {
-        cart = body.products;
+        cart = body.products.map((item: { id: string; count: number; price: number }) => ({
+          ...item,
+          name: product.name,
+        }));
         exists = true;
         result = { success: true, cart: { id: 'c1', products: cart, createdAt: '2026-01-01' } };
       }

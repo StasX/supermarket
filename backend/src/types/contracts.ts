@@ -6,8 +6,9 @@ export type LoginInput = Input<'username' | 'password'>;
 export type SignupInput = Input<
   'id' | 'firstName' | 'lastName' | 'city' | 'street' | 'email' | 'pass'
 >;
-export type CategoryInput = Input<'category'>;
-export type SearchInput = Input<'product' | 'name'>;
+export type CatalogInput = Input<'after'>;
+export type CategoryInput = CatalogInput & Input<'category'>;
+export type SearchInput = CatalogInput & Input<'product' | 'name'>;
 export type ProductInput = Input<'id' | 'name' | 'category' | 'price' | 'image'>;
 export type CartInput = Input<'id' | 'products'>;
 export type CheckoutInput = Input<'cartId' | 'reviewedItems' | 'shipping' | 'payment'>;

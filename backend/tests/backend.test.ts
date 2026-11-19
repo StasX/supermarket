@@ -1208,6 +1208,7 @@ test('listing, filtering, and search return the same public product fields', asy
     products: [
       { id: 'p1', name: 'Juice', price: 10, image: 'juice.png', category: 'Wine & Drinks' },
     ],
+    nextCursor: null,
   });
   for (const [route, body] of [
     ['/api/products/by-category', { category: 'Wine & Drinks' }],
@@ -1222,7 +1223,28 @@ test('listing handles an empty collection', async () => {
   expect((await api().get('/api/products').set('Cookie', cookie())).body).toEqual({
     success: true,
     products: [],
+    nextCursor: null,
   });
+});
+
+test('catalog pages are bounded and use the last returned ID as a cursor', async () => {
+  const rows = Array.from({ length: 25 }, (_, index) => ({
+    _id: index.toString(16).padStart(24, '0'),
+    name: `Product ${index}`,
+  }));
+  models.products.find.mockResolvedValueOnce(rows).mockResolvedValueOnce(rows.slice(24));
+  const first = await api().get('/api/products').set('Cookie', cookie()).expect(200);
+  expect(first.body.products).toHaveLength(24);
+  expect(first.body.nextCursor).toBe(rows[23]._id);
+  const next = await api()
+    .get('/api/products')
+    .query({ after: first.body.nextCursor })
+    .set('Cookie', cookie())
+    .expect(200);
+  expect(next.body.products).toHaveLength(1);
+  expect(next.body.nextCursor).toBeNull();
+  expect(models.products.find.mock.calls[1][0]).toEqual({ _id: { $gt: rows[23]._id } });
+  expect(models.products.find.mock.calls[1][2]).toMatchObject({ sort: { _id: 1 }, limit: 25 });
 });
 
 test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async (category) => {
@@ -1232,10 +1254,10 @@ test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async (c
     .send({ category })
     .expect(200);
   expect(result.body).toEqual(
-    category === 'invalid' ? { success: false } : { success: true, products: [] },
+    category === 'invalid' ? { success: false } : { success: true, products: [], nextCursor: null },
   );
   if (category === 'invalid') expect(models.products.find).not.toHaveBeenCalled();
-  else expect(models.products.find).toHaveBeenCalledWith({ category });
+  else expect(models.products.find.mock.calls[0][0]).toEqual({ category });
 });
 
 for (const [route, collection] of [
@@ -1565,9 +1587,11 @@ test('search accepts the frontend product field and escapes regex characters', a
     .set('Cookie', cookie())
     .send({ product: 'Juice (1L)' })
     .expect(200);
-  const expression = models.products.find.mock.calls[0][0].name;
-  expect(expression.test('Juice (1L)')).toBe(true);
-  expect(expression.test('Juice 1L')).toBe(false);
+  const query = models.products.find.mock.calls[0][0];
+  expect(query.searchGrams).toBe('jui');
+  expect(query.searchName.ignoreCase).toBe(false);
+  expect(query.searchName.test('apple juice (1l)')).toBe(true);
+  expect(query.searchName.test('juice 1l')).toBe(false);
 });
 
 test.each(['0.00', '10.99', '001.25', 10.99])('admin can save price %j', async (price) => {
@@ -1619,7 +1643,9 @@ test('admin can add a valid product', async () => {
     (await api().post('/api/products/create').set('Cookie', cookie(admin)).send(body).expect(200))
       .body,
   ).toEqual({ success: true });
-  expect(models.products.create).toHaveBeenCalledWith({ ...body, price: Number(body.price) });
+  expect(models.products.create).toHaveBeenCalledWith(
+    expect.objectContaining({ ...body, price: Number(body.price), searchName: 'juice' }),
+  );
 });
 
 test('admin can edit a product', async () => {

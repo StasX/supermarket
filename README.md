@@ -368,7 +368,7 @@ Response:
 
 `GET /api/products`
 
-No request parameters are needed. The response uses the same product fields as the search and category endpoints.
+The catalog, search, and category endpoints return up to 24 products per request and include `nextCursor`. For the next page, send the cursor as `after` in the catalog URL query or in the search or category JSON body. A null cursor means there are no more results. Searches match literal, case-insensitive substrings. The index provisioning command also backfills searchable fields for existing products.
 
 #### Get products by category
 

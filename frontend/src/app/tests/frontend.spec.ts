@@ -23,6 +23,7 @@ import { LoginPage } from '../pages/login/login.page';
 import { SignupPage } from '../pages/signup/signup.page';
 import { ProductEditorComponent } from '../components/product-editor/product-editor.component';
 import { OrderPage } from '../pages/order/order.page';
+import { StorePage } from '../pages/store/store.page';
 import { CheckoutPage } from '../pages/checkout/checkout.page';
 import { CustomerWelcome } from '../components/customer-welcome/customer-welcome.component';
 import {
@@ -178,14 +179,31 @@ describe('API compatibility', () => {
       success: true,
       products: [product],
     });
-    expect((await promise)[0]).toMatchObject(product);
+    expect((await promise).products[0]).toMatchObject(product);
   });
   it('sends search using the existing frontend field', async () => {
     const promise = TestBed.inject(ApiService).products('', ' Juice ');
     const request = TestBed.inject(HttpTestingController).expectOne('/api/products/search');
     expect(request.request.body).toEqual({ product: 'Juice' });
     request.flush({ success: true, products: [] });
-    expect(await promise).toEqual([]);
+    expect((await promise).products).toEqual([]);
+  });
+  it('appends the next catalog page using the cursor', async () => {
+    const page = TestBed.createComponent(StorePage).componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    const first = page.loadProducts();
+    http.expectOne('/api/products').flush({ success: true, products: [product], nextCursor: 'p1' });
+    await first;
+    const next = page.loadProducts(true);
+    const secondProduct = { ...product, id: 'p2', name: 'Milk' };
+    http.expectOne('/api/products?after=p1').flush({
+      success: true,
+      products: [secondProduct],
+      nextCursor: null,
+    });
+    await next;
+    expect(page.products()).toEqual([product, secondProduct]);
+    expect(page.nextCursor()).toBeNull();
   });
   it('formats admin prices for the backend validator', async () => {
     const promise = TestBed.inject(ApiService).saveProduct(product);
@@ -343,9 +361,12 @@ describe('cart persistence', () => {
     const http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/carts/current').flush({
       success: true,
-      cart: { id: 'c1', products: [{ id: 'p1', count: 2, price: 10.5 }], createdAt: '2026-01-01' },
+      cart: {
+        id: 'c1',
+        products: [{ id: 'p1', count: 2, price: 10.5, name: 'Juice' }],
+        createdAt: '2026-01-01',
+      },
     });
-    http.expectOne('/api/products').flush({ success: true, products: [product] });
     await promise;
     expect(cart.total()).toBe(21);
     expect(cart.lines()[0]?.name).toBe('Juice');
@@ -506,17 +527,11 @@ describe('Angular rendering and forms', () => {
       TestBed.inject(HttpTestingController)
         .expectOne('/api/carts/current')
         .flush({ success: true });
-      TestBed.inject(HttpTestingController)
-        .expectOne('/api/products')
-        .flush({ success: true, products: [] });
     }
     if (url === '/order/payment') {
       TestBed.inject(HttpTestingController)
         .expectOne('/api/carts/current')
         .flush({ success: true });
-      TestBed.inject(HttpTestingController)
-        .expectOne('/api/products')
-        .flush({ success: true, products: [] });
     }
   });
 });
@@ -568,7 +583,6 @@ describe('welcome shopping summary', () => {
       fixture.detectChanges();
       const http = TestBed.inject(HttpTestingController);
       http.expectOne('/api/orders/latest').flush({ success: true, order: previousOrder });
-      http.expectOne('/api/products').flush({ success: true, products: [product] });
       http.expectOne('/api/carts/current').flush({
         success: true,
         ...(state === 'none'
@@ -577,7 +591,8 @@ describe('welcome shopping summary', () => {
               cart: {
                 id: 'c1',
                 createdAt: '2026-01-01T10:00:00Z',
-                products: state === 'full' ? [{ id: 'p1', count: 2, price: 10.5 }] : [],
+                products:
+                  state === 'full' ? [{ id: 'p1', count: 2, price: 10.5, name: 'Juice' }] : [],
               },
             }),
       });
@@ -607,7 +622,6 @@ describe('welcome shopping summary', () => {
     const http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/orders/latest').flush({ success: true });
     http.expectOne('/api/carts/current').flush({ success: true });
-    http.expectOne('/api/products').flush({ success: true, products: [] });
     await vi.waitFor(() => expect(fixture.componentInstance.loading()).toBe(false));
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Welcome to your first buy in Dragon shop');
@@ -678,7 +692,7 @@ describe('demo checkout', () => {
     const page = fixture.componentInstance;
     page.loading.set(false);
     page.cart.id.set('c1');
-    page.cart.items.set([{ id: 'p1', count: 2, price: 10.5 }]);
+    page.cart.items.set([{ id: 'p1', count: 2, price: 10.5, name: 'Juice' }]);
     page.form.setValue({
       city: 'Tel Aviv',
       street: 'Ha Masger 10',
@@ -870,10 +884,9 @@ describe('order review search', () => {
     const fixture = TestBed.createComponent(OrderPage);
     const page = fixture.componentInstance;
     vi.spyOn(page.cart, 'load').mockResolvedValue();
-    page.cart.catalog.set([product, { ...product, id: 'p2', name: 'Milk', price: 4 }]);
     page.cart.items.set([
-      { id: 'p1', count: 2, price: 10.5 },
-      { id: 'p2', count: 1, price: 4 },
+      { id: 'p1', count: 2, price: 10.5, name: 'Juice' },
+      { id: 'p2', count: 1, price: 4, name: 'Milk' },
     ]);
     fixture.detectChanges();
     const input: HTMLInputElement = fixture.nativeElement.querySelector('input[type=search]');

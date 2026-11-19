@@ -368,7 +368,10 @@ test('customer cart creation, duplicate rejection, update and retrieval use Mong
   );
   const cart = (await request('/api/carts/current', { cookie: customerCookie })).body.cart;
   assert.equal(cart.id, created.id);
-  assert.deepEqual(cart.products, products);
+  assert.deepEqual(
+    cart.products,
+    products.map((item) => ({ ...item, name: product.name })),
+  );
   assert.deepEqual((await Cart.findById(created.id)).toObject().products, products);
   assert.equal((await request('/api/orders/count', { cookie: customerCookie })).body.count, 0);
 });

@@ -7,7 +7,6 @@ export class CartService {
   private readonly api = inject(ApiService);
   readonly id = signal<string | null>(null);
   readonly items = signal<CartItem[]>([]);
-  readonly catalog = signal<Product[]>([]);
   readonly busy = signal(false);
   readonly created = signal('');
   readonly total = computed(() =>
@@ -16,21 +15,17 @@ export class CartService {
   readonly lines = computed(() =>
     this.items().map((item) => ({
       ...item,
-      name:
-        item.name ??
-        this.catalog().find((product) => product.id === item.id)?.name ??
-        'Unavailable product',
+      name: item.name ?? 'Unavailable product',
     })),
   );
 
   async load() {
     this.busy.set(true);
     try {
-      const [result, products] = await Promise.all([this.api.cart(), this.api.products()]);
+      const result = await this.api.cart();
       if (!result.success) {
         throw new Error('Unable to load your cart. Please sign in again.');
       }
-      this.catalog.set(products);
       this.id.set(result.cart?.id ?? null);
       this.items.set(result.cart?.products ?? []);
       this.created.set(result.cart?.createdAt ?? '');
@@ -83,7 +78,6 @@ export class CartService {
   clear() {
     this.id.set(null);
     this.items.set([]);
-    this.catalog.set([]);
     this.created.set('');
   }
 }

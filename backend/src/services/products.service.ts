@@ -1,10 +1,17 @@
-import { CartItem, CategoryInput, SearchInput, ProductInput } from '../types/contracts';
+import {
+  CartItem,
+  CatalogInput,
+  CategoryInput,
+  SearchInput,
+  ProductInput,
+} from '../types/contracts';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { validateCartItems } from '../validators/cart.validator';
 import { isObjectId } from '../validators/object-id';
+import { productSearchFields } from '../utils/product-search';
 import {
   isProductCategory,
   validateProduct,
@@ -30,6 +37,8 @@ interface ProductRecord {
   image?: string | null;
   category: string;
 }
+
+const catalogPageSize = 24;
 
 function productResponse({ _id, name, price, image, category }: ProductRecord) {
   return { id: _id, name, price, image: image ?? '', category };
@@ -67,12 +76,8 @@ export class ProductsService {
     }
   }
 
-  async products() {
-    const products: ProductRecord[] = await this.models.products.find({});
-    return {
-      success: true,
-      products: products.map(productResponse),
-    };
+  async products(query: CatalogInput) {
+    return this.catalogPage({}, query.after);
   }
 
   async category(body: CategoryInput) {
@@ -80,10 +85,7 @@ export class ProductsService {
     if (!isProductCategory(category)) {
       return { success: false };
     }
-    return {
-      success: true,
-      products: (await this.models.products.find({ category })).map(productResponse),
-    };
+    return this.catalogPage({ category }, body.after);
   }
 
   async find(body: SearchInput) {
@@ -91,13 +93,23 @@ export class ProductsService {
     if (!name) {
       return { success: false };
     }
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return {
-      success: true,
-      products: (await this.models.products.find({ name: new RegExp(escaped, 'i') })).map(
-        productResponse,
-      ),
-    };
+    const normalized = name.toLowerCase();
+    const gram = Array.from(normalized).slice(0, 3).join('');
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return this.catalogPage({ searchGrams: gram, searchName: new RegExp(escaped) }, body.after);
+  }
+
+  private async catalogPage(filter: Record<string, unknown>, after: unknown) {
+    if (after !== undefined && !isObjectId(after)) return { success: false };
+    const hint = filter['searchGrams'] ? { searchGrams: 1, _id: 1 } : undefined;
+    const rows = await this.models.products.find(
+      { ...filter, ...(after === undefined ? {} : { _id: { $gt: after } }) },
+      { name: 1, category: 1, price: 1, image: 1 },
+      { sort: { _id: 1 }, limit: catalogPageSize + 1, ...(hint ? { hint } : {}) },
+    );
+    const products = rows.slice(0, catalogPageSize).map(productResponse);
+    const nextCursor = rows.length > catalogPageSize ? String(products.at(-1)!.id) : null;
+    return { success: true, products, nextCursor };
   }
 
   async saveProduct(body: ProductInput, edit = false, upload?: ProductImageUpload) {
@@ -123,6 +135,7 @@ export class ProductsService {
     const nextImage = filename ? uploadedImagePrefix + filename : image;
     const product = {
       name,
+      ...productSearchFields(name),
       category,
       price,
       ...(nextImage !== undefined ? { image: nextImage } : {}),
@@ -174,6 +187,13 @@ export class ProductsService {
 
   async count() {
     return { success: true, count: await this.models.products.countDocuments({}) };
+  }
+
+  async productNames(ids: string[]) {
+    const validIds = [...new Set(ids.filter(isObjectId))];
+    if (!validIds.length) return new Map<string, string>();
+    const rows = await this.models.products.find({ _id: { $in: validIds } }, { name: 1 });
+    return new Map(rows.map((row) => [String(row._id), row.name]));
   }
 
   async resolveCartProducts(input: unknown, includeNames = false) {
