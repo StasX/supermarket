@@ -58,10 +58,12 @@ function validateShippingDate(value: unknown) {
 export function matchesReviewedItems(reviewed: unknown, products: CartItem[]): boolean {
   if (!Array.isArray(reviewed) || reviewed.length !== products.length) return false;
 
-  const byId = new Map<unknown, Record<string, unknown>>();
+  const byId = new Map<string, Record<string, unknown>>();
   for (const value of reviewed as unknown[]) {
     const item = record(value);
-    byId.set(item['id'], item);
+    const id = item['id'];
+    if (typeof id !== 'string' || byId.has(id)) return false;
+    byId.set(id, item);
   }
 
   return products.every(({ id, count, price }) => {

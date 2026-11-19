@@ -386,6 +386,24 @@ test('checkout rejects another customer cart or an empty cart', async () => {
   expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
 });
 
+test('checkout rejects duplicate reviewed product IDs without closing the cart', async () => {
+  const products = [
+    { id: admin._id, count: 1, price: 5.25 },
+    { id: customer._id, count: 1, price: 4.75 },
+  ];
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
+  models.products.find.mockResolvedValue(products.map(({ id, price }) => ({ _id: id, price })));
+  const item = { id: admin._id, count: 1, unitPriceCents: 525 };
+  const response = await api()
+    .post('/api/orders/checkout')
+    .set('Cookie', cookie())
+    .send({ ...checkoutBody, reviewedItems: [item, item] })
+    .expect(200);
+  expect(response.body).toMatchObject({ success: false, review: { products } });
+  expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
+});
+
 test('checkout requires a new review when line prices change even if the total matches', async () => {
   const products = [
     { id: admin._id, count: 1, price: 5.25 },
