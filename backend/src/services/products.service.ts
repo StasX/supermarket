@@ -43,13 +43,25 @@ export class ProductsService {
   ) {}
 
   async productImage(filename: string) {
+    const image = uploadedImagePrefix + filename;
     if (
       !uploadedFilenamePattern.test(filename) ||
-      !(await this.models.products.exists({ image: uploadedImagePrefix + filename }))
+      !(await this.models.products.exists({ image }))
     ) {
       throw new NotFoundException();
     }
-    return this.images.get(filename);
+    const stream = await this.images.get(filename);
+    // The response cannot handle stream errors until the ownership check finishes.
+    stream.once('error', () => undefined);
+    try {
+      // The product may have been edited or deleted while storage opened the stream.
+      if (!(await this.models.products.exists({ image }))) throw new NotFoundException();
+      if (stream.errored) throw stream.errored;
+      return stream;
+    } catch (error) {
+      stream.destroy();
+      throw error;
+    }
   }
 
   async products() {
@@ -162,6 +174,8 @@ export class ProductsService {
     const filename = image.slice(uploadedImagePrefix.length);
     if (!uploadedFilenamePattern.test(filename)) return;
     try {
+      // Once detached, a managed URL cannot be attached again through a product save.
+      if (await this.models.products.exists({ image })) return;
       await this.images.deleteProductImage(filename);
     } catch {
       this.logger.error(`Could not delete unused product image ${filename}`);

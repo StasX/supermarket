@@ -965,12 +965,36 @@ test('a product save detects the file format and only serves owned uploads', asy
   const { image } = models.products.create.mock.calls[0][0];
   expect(image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
   await api().get(image).expect(404);
-  models.products.exists.mockResolvedValueOnce({ _id: customer._id });
+  models.products.exists
+    .mockResolvedValueOnce({ _id: customer._id })
+    .mockResolvedValueOnce({ _id: customer._id });
   const served = await api()
     .get(image)
     .expect(200)
     .expect('Content-Type', /image\/png/);
   expect(served.body.equals(fs.readFileSync(productImageFile))).toBe(true);
+});
+
+test('an image read that overlaps product deletion discards the opened stream', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  const stream = Readable.from([Buffer.from('old image')]);
+  models.products.exists.mockResolvedValueOnce({ _id: customer._id });
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image });
+  const get = jest.spyOn(app.get(ImageStorageService), 'get').mockImplementationOnce(async () => {
+    await api()
+      .post('/api/products/delete')
+      .set('Cookie', cookie(admin))
+      .send({ id: customer._id })
+      .expect(200);
+    return stream;
+  });
+  try {
+    await api().get(image).expect(404);
+    expect(stream.destroyed).toBe(true);
+  } finally {
+    get.mockRestore();
+  }
 });
 
 test('missing uploaded images return 404', async () => {
@@ -1045,6 +1069,22 @@ test('replacing and deleting a product remove the respective managed images', as
     .send({ id: customer._id })
     .expect(200);
   expect(images.size).toBe(0);
+});
+
+test('cleanup preserves an image that still has a product reference', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  images.set(filename, Buffer.from('owned image'));
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image });
+  models.products.exists.mockResolvedValueOnce({ _id: admin._id });
+  const result = await api()
+    .post('/api/products/delete')
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id })
+    .expect(200);
+  expect(result.body).toEqual({ success: true });
+  expect(models.products.exists).toHaveBeenCalledWith({ image });
+  expect(images.has(filename)).toBe(true);
 });
 
 test('an existing upload can only be retained by the product that owns it', async () => {
