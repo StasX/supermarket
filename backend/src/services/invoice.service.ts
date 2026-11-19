@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ImageStorageService } from './image-storage.service';
-import { createInvoice, InvoiceOrder } from '../utils/invoice';
+import { createInvoice } from '../utils/invoice';
 
 @Injectable()
 export class InvoiceService {
@@ -10,21 +10,6 @@ export class InvoiceService {
     @Inject(MODELS) private readonly models: DatabaseModels,
     private readonly storage: ImageStorageService,
   ) {}
-
-  async ensure(order: InvoiceOrder & { invoiceKey?: string }) {
-    const id = String(order._id);
-    const key = `invoices/${id}.pdf`;
-    if (!order.invoiceKey) {
-      // Conditional creation preserves the first PDF during retries and concurrent checkouts.
-      await this.storage.putInvoice(id, createInvoice(order));
-      await this.models.orders.findOneAndUpdate(
-        { _id: order._id },
-        { $set: { invoiceKey: key } },
-        { runValidators: true },
-      );
-    }
-    return `/orders/${id}/invoice`;
-  }
 
   async download(user: { id: number }, id: string) {
     if (!mongoose.isObjectIdOrHexString(id)) {
@@ -38,7 +23,14 @@ export class InvoiceService {
     if (!order) {
       throw new NotFoundException();
     }
-    await this.ensure(order);
-    return this.storage.getInvoice(String(order._id));
+    const invoiceId = String(order._id);
+    try {
+      return await this.storage.getInvoice(invoiceId);
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+    }
+    // Concurrent downloads must all serve the PDF that won the conditional upload.
+    await this.storage.putInvoice(invoiceId, createInvoice(order));
+    return this.storage.getInvoice(invoiceId);
   }
 }

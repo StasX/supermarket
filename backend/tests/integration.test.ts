@@ -446,7 +446,7 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
     'payment.mode': 'demo',
   }).lean();
   const url = `/orders/${order._id}/invoice`;
-  assert.equal(order.invoiceKey, `invoices/${order._id}.pdf`);
+  const invoiceKey = `invoices/${order._id}.pdf`;
   assert.equal(order.products[0].name, 'Test Milk');
   const download = await fetch(base + url, { headers: { Cookie: customerCookie } });
   assert.equal(download.status, 200);
@@ -464,7 +464,7 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
     const stored = await client.send(
       new GetObjectCommand({
         Bucket: process.env['S3_BUCKET'] || 'product-images',
-        Key: order.invoiceKey,
+        Key: invoiceKey,
       }),
     );
     assert.equal(stored.ContentType, 'application/pdf');
@@ -479,7 +479,7 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
     const head = await client.send(
       new HeadObjectCommand({
         Bucket: process.env['S3_BUCKET'] || 'product-images',
-        Key: order.invoiceKey,
+        Key: invoiceKey,
       }),
     );
     assert.equal(head.ETag, stored.ETag);

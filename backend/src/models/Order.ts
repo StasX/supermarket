@@ -1,14 +1,8 @@
 import mongoose from 'mongoose';
-import type { OrderRecord } from '../types/contracts';
+import type { OrderSnapshot } from '../types/contracts';
 import { orderSnapshotFields } from './order-snapshot.schema';
 
-const orderSchema = new mongoose.Schema<OrderRecord>(
-  {
-    ...orderSnapshotFields,
-    invoiceKey: { type: String, match: /^invoices\/[a-f\d]{24}\.pdf$/i },
-  },
-  { strict: 'throw' },
-);
+const orderSchema = new mongoose.Schema<OrderSnapshot>(orderSnapshotFields, { strict: 'throw' });
 
 orderSchema.index(
   { cart_id: 1 },

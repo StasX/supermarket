@@ -58,9 +58,6 @@ export interface OrderSnapshot {
   products: CartItem[];
   payment: { mode: string; method: string; last4: string };
 }
-export interface OrderRecord extends OrderSnapshot {
-  invoiceKey?: string;
-}
 export interface CartRecord {
   user_id: number;
   products: CartItem[];

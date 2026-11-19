@@ -3,7 +3,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ProductsService } from './products.service';
-import { InvoiceService } from './invoice.service';
 
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
@@ -13,7 +12,6 @@ export class CheckoutService {
   constructor(
     @Inject(MODELS) private readonly models: DatabaseModels,
     private readonly products: ProductsService,
-    private readonly invoices: InvoiceService,
   ) {}
 
   async count() {
@@ -124,7 +122,6 @@ export class CheckoutService {
       order = await this.models.orders.findOne(query);
     }
     if (!order) throw new Error('Unable to recover the checkout order.');
-    const invoiceUrl = await this.invoices.ensure(order);
     return {
       success: true,
       order: {
@@ -133,7 +130,7 @@ export class CheckoutService {
         products: order.products,
         shipping: order.shipping,
         payment: order.payment,
-        invoiceUrl,
+        invoiceUrl: `/orders/${order._id}/invoice`,
       },
     };
   }
