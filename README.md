@@ -158,7 +158,15 @@ redis/
   workflows/   Tests, security scans, and report artifacts
 ```
 
-Use Node.js 26.13.1 LTS (`.nvmrc`), also pinned in Docker and GitHub Actions. All project manifests require the Node.js 26 line starting at 26.13.1; Node.js 25 is unsupported. Install dependencies with `npm ci --prefix backend` and `npm ci --prefix frontend`, then run `npm start` after setting up MongoDB, Redis, MinIO/S3, and a session signing key. The backend waits for MongoDB indexes and its Redis connection before accepting requests; with `S3_CREATE_BUCKET=true`, it also checks or creates the storage bucket at startup. Startup builds the Angular application into `frontend/dist/browser` and compiles NestJS into `backend/dist`. NestJS serves the built frontend and API at `http://localhost:3000`, keeping session cookies on the same origin.
+Use Node.js 26.13.1 LTS (`.nvmrc`), also pinned in Docker and GitHub Actions. All project manifests require the Node.js 26 line starting at 26.13.1; Node.js 25 is unsupported. Install dependencies with `npm ci --prefix backend` and `npm ci --prefix frontend`. Set up MongoDB, Redis, MinIO/S3, and a session signing key. Before the first local start or after upgrading to a release that adds indexes, build the backend and provision indexes against the same `MONGODB_URI` that the app uses:
+
+```sh
+npm --prefix backend run build
+npm --prefix backend run db:indexes
+npm start
+```
+
+Startup verifies the required MongoDB indexes and waits for Redis before accepting requests. The index command creates missing indexes and preserves existing ones. With `S3_CREATE_BUCKET=true`, the backend also checks or creates the storage bucket at startup. Startup builds the Angular application into `frontend/dist/browser` and compiles NestJS into `backend/dist`. NestJS serves the built frontend and API at `http://localhost:3000`, keeping session cookies on the same origin.
 
 The frontend uses Angular 22, TypeScript 6, standalone components, reactive forms, signals, HttpClient, and role-based route guards. AngularJS, UI Router, jQuery, and their old templates have been removed. Hash routing keeps frontend URLs separate from API endpoints; old `#!/` bookmarks are normalized to `#/`. Product listing, category filtering, search, administrator add/edit/delete, two-step signup with email/ID availability checks, login, session reconnect, and saved carts use the existing API. Cart state is restored from MongoDB rather than the old browser localStorage format. Checkout collects city, street, shipping date, and demo credit-card details, then saves the order and closes the cart. Demo checkout does not charge a card.
 
@@ -187,6 +195,8 @@ docker compose up --build -d --wait
 Open `http://localhost:3000`. The multi-stage app image compiles Angular and NestJS, then includes the built frontend and production backend dependencies. MongoDB is available only inside the Compose network. Its image imports the four `db/seeds/*.json` files into `shop` when the database volume is first initialized. Existing database volumes are preserved and are not reimported.
 
 MongoDB data, Redis append-only files, MinIO objects, and the generated session-signing key are stored in the named volumes `mongodb_data`, `redis_data`, `minio_data`, and `app_keys`. Stop the containers while retaining these volumes with `docker compose down`. View logs with `docker compose logs -f`.
+
+Compose runs the one-shot `db-indexes` service after MongoDB is healthy. The app starts after provisioning succeeds. See `docker compose logs db-indexes` if provisioning fails.
 
 The application is published on the configured `PORT` (3000 in `.env.example`), and the MinIO console is published at `http://localhost:9001`. MongoDB (27017), Redis (6379), and the MinIO API (9000) are reachable only inside the Compose network. A backend running directly on the host needs independently reachable service endpoints or explicit development port mappings.
 
@@ -436,7 +446,7 @@ No request parameters are needed. The response has the same profile fields as lo
 
 `POST /api/auth/signup/availability` accepts `{ "email": "buyer@example.com", "id": "123456789" }` with a valid CSRF token. It returns `success`, `available`, `emailExists`, `idExists`, and a `reason` when either value is already registered. It does not create an account or receive passwords.
 
-The signup **Continue** button checks this endpoint before showing personal details. Duplicate email or ID values keep the user on step one with a specific message. While checking, the button and account fields are locked; failed checks can be retried. Final signup checks both fields again, and MongoDB unique indexes reject concurrent duplicates. Backend startup waits for the user, cart, and order indexes; conflicting existing records must be resolved before startup can complete.
+The signup **Continue** button checks this endpoint before showing personal details. Duplicate email or ID values keep the user on step one with a specific message. While checking, the button and account fields are locked; failed checks can be retried. Final signup checks both fields again, and MongoDB unique indexes reject concurrent duplicates. Resolve any conflicting records before provisioning the indexes.
 
 #### Sign up
 
@@ -497,7 +507,7 @@ All of these endpoints require a customer session and operate on that customer's
 
 Cart item IDs must identify existing products, quantities must be positive safe integers, and duplicate product IDs are rejected. Prices are taken from the database; client-supplied prices are ignored. An empty product array is allowed.
 
-A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces one open cart per customer, including concurrent requests. Closed carts are unaffected. Startup waits for this index to be created; if existing data contains multiple open carts for a user, startup fails until those records are reviewed and the extra carts are closed or otherwise resolved. No existing carts are automatically changed or deleted.
+A unique partial MongoDB index on `user_id` for carts with `status: 1` enforces one open cart per customer, including concurrent requests. Closed carts are unaffected. If existing data contains multiple open carts for a user, provisioning fails until those records are reviewed and the extra carts are closed or otherwise resolved.
 
 The customer welcome page shows the open cart (including an empty open cart), its contents, total, and creation date labeled **Created at**. Without an open cart, it shows the latest order when available and a **Start shopping** button. The welcome heading uses login history: signup marks a new account as not yet logged in, and the first successful login atomically marks it as logged in. Later logins show **Welcome back to Dragon shop** even without prior orders. The signed session retains its greeting across page reloads. Existing accounts and legacy sessions are treated as returning customers.
 

@@ -18,6 +18,7 @@ const User = require('../dist/models/User');
 const Product = require('../dist/models/Product');
 const Cart = require('../dist/models/Cart');
 const Order = require('../dist/models/Order');
+const { connectDatabase, provisionDatabaseIndexes } = require('../dist/database/database');
 const { AuthRateLimitStore } = require('../dist/stores/auth-rate-limit.store');
 
 test('Redis rate limits are atomic across replicas and expire without extending the window', async () => {
@@ -102,14 +103,14 @@ before(
       uri && /^mongodb:\/\/[^/]+\/shop_integration(?:\?|$)/.test(uri),
       'MONGODB_URI must point to a dedicated shop_integration database',
     );
-    await mongoose.connect(uri);
-    await Promise.all([User.init(), Product.init(), Cart.init(), Order.init()]);
+    await connectDatabase(uri);
     await Promise.all([
       User.deleteMany({}),
       Product.deleteMany({}),
       Cart.deleteMany({}),
       Order.deleteMany({}),
     ]);
+    await provisionDatabaseIndexes();
     await User.create({
       id: 987654321,
       username: 'admin@example.com',
