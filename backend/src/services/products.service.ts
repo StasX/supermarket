@@ -1,10 +1,17 @@
-import { CartItem, CategoryInput, SearchInput, ProductInput } from '../types/contracts';
+import {
+  CartItem,
+  CatalogInput,
+  CategoryInput,
+  SearchInput,
+  ProductInput,
+} from '../types/contracts';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { validateCartItems } from '../validators/cart.validator';
 import { isObjectId } from '../validators/object-id';
+import { productSearchFields } from '../utils/product-search';
 import {
   isProductCategory,
   validateProduct,
@@ -12,9 +19,11 @@ import {
 } from '../validators/product.validator';
 import { ImageStorageService } from './image-storage.service';
 
-const uploadedImagePrefix = '/products/uploads/';
-const uploadedFilenamePattern =
-  /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(?:png|jpg|webp)$/;
+import {
+  ProductImageCleanupService,
+  uploadedFilenamePattern,
+  uploadedImagePrefix,
+} from './product-image-cleanup.service';
 
 interface ProductImageUpload {
   bytes: Buffer;
@@ -29,6 +38,8 @@ interface ProductRecord {
   category: string;
 }
 
+const catalogPageSize = 24;
+
 function productResponse({ _id, name, price, image, category }: ProductRecord) {
   return { id: _id, name, price, image: image ?? '', category };
 }
@@ -40,24 +51,33 @@ export class ProductsService {
   constructor(
     @Inject(MODELS) private readonly models: DatabaseModels,
     private readonly images: ImageStorageService,
+    private readonly imageCleanup: ProductImageCleanupService,
   ) {}
 
   async productImage(filename: string) {
+    const image = uploadedImagePrefix + filename;
     if (
       !uploadedFilenamePattern.test(filename) ||
-      !(await this.models.products.exists({ image: uploadedImagePrefix + filename }))
+      !(await this.models.products.exists({ image }))
     ) {
       throw new NotFoundException();
     }
-    return this.images.get(filename);
+    const stream = await this.images.get(filename);
+    // The response cannot handle stream errors until the ownership check finishes.
+    stream.once('error', () => undefined);
+    try {
+      // The product may have been edited or deleted while storage opened the stream.
+      if (!(await this.models.products.exists({ image }))) throw new NotFoundException();
+      if (stream.errored) throw stream.errored;
+      return stream;
+    } catch (error) {
+      stream.destroy();
+      throw error;
+    }
   }
 
-  async products() {
-    const products: ProductRecord[] = await this.models.products.find({});
-    return {
-      success: true,
-      products: products.map(productResponse),
-    };
+  async products(query: CatalogInput) {
+    return this.catalogPage({}, query.after);
   }
 
   async category(body: CategoryInput) {
@@ -65,10 +85,7 @@ export class ProductsService {
     if (!isProductCategory(category)) {
       return { success: false };
     }
-    return {
-      success: true,
-      products: (await this.models.products.find({ category })).map(productResponse),
-    };
+    return this.catalogPage({ category }, body.after);
   }
 
   async find(body: SearchInput) {
@@ -76,13 +93,23 @@ export class ProductsService {
     if (!name) {
       return { success: false };
     }
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return {
-      success: true,
-      products: (await this.models.products.find({ name: new RegExp(escaped, 'i') })).map(
-        productResponse,
-      ),
-    };
+    const normalized = name.toLowerCase();
+    const gram = Array.from(normalized).slice(0, 3).join('');
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return this.catalogPage({ searchGrams: gram, searchName: new RegExp(escaped) }, body.after);
+  }
+
+  private async catalogPage(filter: Record<string, unknown>, after: unknown) {
+    if (after !== undefined && !isObjectId(after)) return { success: false };
+    const hint = filter['searchGrams'] ? { searchGrams: 1, _id: 1 } : undefined;
+    const rows = await this.models.products.find(
+      { ...filter, ...(after === undefined ? {} : { _id: { $gt: after } }) },
+      { name: 1, category: 1, price: 1, image: 1 },
+      { sort: { _id: 1 }, limit: catalogPageSize + 1, ...(hint ? { hint } : {}) },
+    );
+    const products = rows.slice(0, catalogPageSize).map(productResponse);
+    const nextCursor = rows.length > catalogPageSize ? String(products.at(-1)!.id) : null;
+    return { success: true, products, nextCursor };
   }
 
   async saveProduct(body: ProductInput, edit = false, upload?: ProductImageUpload) {
@@ -100,7 +127,7 @@ export class ProductsService {
         const contentType = upload.extension === 'jpg' ? 'image/jpeg' : `image/${upload.extension}`;
         await this.images.put(filename, upload.bytes, contentType);
       } catch (error) {
-        await this.removeUploadedImage(uploadedImagePrefix + filename);
+        await this.imageCleanup.remove(uploadedImagePrefix + filename);
         throw error;
       }
     }
@@ -108,6 +135,7 @@ export class ProductsService {
     const nextImage = filename ? uploadedImagePrefix + filename : image;
     const product = {
       name,
+      ...productSearchFields(name),
       category,
       price,
       ...(nextImage !== undefined ? { image: nextImage } : {}),
@@ -125,9 +153,9 @@ export class ProductsService {
               { $set: product },
               { returnDocument: 'before', runValidators: true },
             );
-        if (!previous && filename) await this.removeUploadedImage(product.image);
+        if (!previous && filename) await this.imageCleanup.remove(product.image);
         if (previous && product.image !== undefined && previous.image !== product.image) {
-          await this.removeUploadedImage(previous.image);
+          await this.imageCleanup.remove(previous.image);
         }
         return { success: Boolean(previous) };
       }
@@ -135,12 +163,12 @@ export class ProductsService {
       return { success: true };
     } catch (error) {
       if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
-        if (filename) await this.removeUploadedImage(product.image);
+        if (filename) await this.imageCleanup.remove(product.image);
         return { success: false };
       }
       if (filename) {
         if (error instanceof mongoose.Error.ValidationError) {
-          await this.removeUploadedImage(product.image);
+          await this.imageCleanup.remove(product.image);
         } else {
           // A lost database acknowledgement may still have committed the image reference.
           this.logger.warn(`Could not confirm the product save for image ${filename}`);
@@ -153,23 +181,19 @@ export class ProductsService {
   async deleteProduct(body: Pick<ProductInput, 'id'>) {
     if (!isObjectId(body?.id)) return { success: false };
     const deleted = await this.models.products.findByIdAndDelete(body.id);
-    if (deleted) await this.removeUploadedImage(deleted.image);
+    if (deleted) await this.imageCleanup.remove(deleted.image);
     return { success: Boolean(deleted) };
-  }
-
-  private async removeUploadedImage(image?: string | null) {
-    if (!image?.startsWith(uploadedImagePrefix)) return;
-    const filename = image.slice(uploadedImagePrefix.length);
-    if (!uploadedFilenamePattern.test(filename)) return;
-    try {
-      await this.images.deleteProductImage(filename);
-    } catch {
-      this.logger.error(`Could not delete unused product image ${filename}`);
-    }
   }
 
   async count() {
     return { success: true, count: await this.models.products.countDocuments({}) };
+  }
+
+  async productNames(ids: string[]) {
+    const validIds = [...new Set(ids.filter(isObjectId))];
+    if (!validIds.length) return new Map<string, string>();
+    const rows = await this.models.products.find({ _id: { $in: validIds } }, { name: 1 });
+    return new Map(rows.map((row) => [String(row._id), row.name]));
   }
 
   async resolveCartProducts(input: unknown, includeNames = false) {

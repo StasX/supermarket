@@ -331,7 +331,7 @@ For `/api/products/update`, include an additional `id` field containing the prod
 
 #### Upload a product image
 
-To attach a file, send the product fields and an `image` file (PNG, JPEG, or WebP, up to 5 MB) as multipart form data to `POST /api/products/create` or `POST /api/products/update`. Include `id` for updates. The saved upload URL appears in the catalog. A JSON update can keep the product's current upload by sending its existing URL or omitting the image field. Replacing an upload or deleting its product removes the old object. Bundled images and external URLs are supported as JSON image values.
+To attach a file, send the product fields and an `image` file (PNG, JPEG, or WebP, up to 5 MB) as multipart form data to `POST /api/products/create` or `POST /api/products/update`. Include `id` for updates. The saved upload URL appears in the catalog. A JSON update can keep the product's current upload by sending its existing URL or omitting the image field. Replacing an upload or deleting its product removes the old object. Failed deletions are queued in MongoDB and retried after restart with increasing delays. Each retry checks for product references before deleting the object. Bundled images and external URLs are supported as JSON image values.
 
 #### Find a product
 
@@ -368,7 +368,7 @@ Response:
 
 `GET /api/products`
 
-No request parameters are needed. The response uses the same product fields as the search and category endpoints.
+The catalog, search, and category endpoints return up to 24 products per request and include `nextCursor`. For the next page, send the cursor as `after` in the catalog URL query or in the search or category JSON body. A null cursor means there are no more results. Searches match literal, case-insensitive substrings. The index provisioning command also backfills searchable fields for existing products.
 
 #### Get products by category
 
@@ -544,7 +544,7 @@ Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, st
 
 Shipping dates are checked against the shop date in `Asia/Jerusalem`. The backend checks the reviewed product IDs, quantities, and unit prices against the current cart and catalog, then calculates the total server-side. If they differ, it leaves the cart open and returns `{ "success": false, "reason": "...", "review": { "products": [...] } }` so the customer can review the updated items and submit again. A confirmed order uses the prices that matched the customer's review. Success returns `{ "success": true, "order": { "id": "...", "total": 10.50, "createdAt": "...", "products": [{ "id": "...", "name": "...", "count": 1, "price": 10.50 }], "invoiceUrl": "/orders/<order-id>/invoice", "shipping": { "city": "...", "street": "...", "date": "..." }, "payment": { "mode": "demo", "method": "credit_card", "last4": "4242" } } }`. Other validation failures return `{ "success": false, "reason": "..." }`.
 
-Checkout closes the cart and saves an immutable order snapshot in one atomic cart update. An order is then inserted with a unique partial index for demo orders by cart ID. Concurrent requests and retries reuse this snapshot and return the same order, including recovery after an interrupted order insert; an intervening cart edit prevents stale checkout. Only demo payment metadata is stored. Existing order records are retained. Real payments require a provider integration before this feature can charge cards.
+Checkout closes the cart and saves an immutable order snapshot in one atomic cart update. The backend then inserts an order, using a unique partial index to enforce one demo order per cart. Checkout retries and the background recovery pass reuse that snapshot. The recovery pass runs at startup and every 30 seconds, so an interrupted order insert can complete even if the customer closes the page. Order history uses the checkout timestamp, so recovering an older order does not move it ahead of a newer purchase. An intervening cart edit prevents stale checkout. Only demo payment metadata is stored. Real payments require a provider integration before this feature can charge cards.
 
 The first authorized download generates the invoice in the same green table style as the order review. The PDF uses the saved product names, quantities, and prices from checkout. It is stored privately in the configured S3/MinIO bucket (`S3_BUCKET`, default `product-images`) at `invoices/<order-id>.pdf`. The existing MinIO data volume preserves invoice files. AWS deployments need read/write permission for this prefix as well as product images.
 

@@ -4,6 +4,8 @@ import Product = require('../models/Product');
 import Cart = require('../models/Cart');
 import Order = require('../models/Order');
 import RevokedSession = require('../models/RevokedSession');
+import ProductImageDeletion = require('../models/ProductImageDeletion');
+import { productSearchFields } from '../utils/product-search';
 
 export const databaseModels = {
   users: User,
@@ -11,6 +13,7 @@ export const databaseModels = {
   carts: Cart,
   orders: Order,
   revokedSessions: RevokedSession,
+  productImageDeletions: ProductImageDeletion,
 };
 
 export type DatabaseModels = typeof databaseModels;
@@ -30,6 +33,16 @@ async function modelsWithMissingIndexes() {
 export async function provisionDatabaseIndexes() {
   for (const model of await modelsWithMissingIndexes()) {
     await model.createIndexes();
+  }
+  const products = databaseModels.products.collection;
+  for await (const product of products.find(
+    { searchName: { $exists: false }, name: { $type: 'string' } },
+    { projection: { name: 1 } },
+  )) {
+    await products.updateOne(
+      { _id: product._id, name: product['name'], searchName: { $exists: false } },
+      { $set: productSearchFields(product['name']) },
+    );
   }
 }
 

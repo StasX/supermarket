@@ -53,7 +53,7 @@
         <tbody>
           @for (item of order.products; track $index) {
             <tr>
-              <td>{{ item.name || productName(item.id) }}</td>
+              <td>{{ item.name || 'Unavailable product' }}</td>
               <td>{{ item.count }}</td>
               <td>{{ item.price | currency: 'USD' }}</td>
               <td>{{ item.price * item.count | currency: 'USD' }}</td>

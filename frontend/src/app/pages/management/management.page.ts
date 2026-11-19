@@ -17,6 +17,7 @@ export class ManagementPage implements OnInit {
   private readonly api = inject(ApiService);
   readonly categories = categories;
   readonly products = signal<Product[]>([]);
+  readonly nextCursor = signal<string | null>(null);
   readonly loading = signal(false);
   readonly error = signal('');
   readonly deleting = signal(false);
@@ -27,6 +28,7 @@ export class ManagementPage implements OnInit {
   search = '';
   category = '';
   private latestRequestId = 0;
+  private filters = { category: '', search: '' };
 
   ngOnInit() {
     void this.load();
@@ -71,16 +73,29 @@ export class ManagementPage implements OnInit {
     }
   }
 
-  async load() {
+  async load(append = false) {
+    const cursor = append ? this.nextCursor() : null;
+    if (append && (!cursor || this.loading())) return;
+    if (!append) {
+      this.filters = { category: this.category, search: this.search };
+      this.nextCursor.set(null);
+    }
     const requestId = ++this.latestRequestId;
     this.loading.set(true);
     try {
-      const products = await this.api.products(this.category, this.search);
+      const page = await this.api.products(
+        this.filters.category,
+        this.filters.search,
+        cursor ?? undefined,
+      );
       if (requestId === this.latestRequestId) {
-        this.products.set(products);
+        this.products.update((products) =>
+          append ? [...products, ...page.products] : page.products,
+        );
+        this.nextCursor.set(page.nextCursor ?? null);
       }
     } catch (error) {
-      this.error.set(message(error));
+      if (requestId === this.latestRequestId) this.error.set(message(error));
     } finally {
       if (requestId === this.latestRequestId) {
         this.loading.set(false);

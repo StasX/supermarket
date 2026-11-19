@@ -47,6 +47,11 @@
       <p>No products found.</p>
       } }
     </div>
+    @if (nextCursor()) {
+    <button type="button" class="secondary" (click)="load(true)" [disabled]="loading()">
+      Load more products
+    </button>
+    }
   </section>
 </div>
 <dialog

@@ -18,11 +18,13 @@ export class StorePage implements OnInit {
   readonly cart = inject(CartService);
   readonly categories = categories;
   readonly products = signal<Product[]>([]);
+  readonly nextCursor = signal<string | null>(null);
   readonly loading = signal(false);
   readonly error = signal('');
   search = '';
   category = '';
   private latestRequestId = 0;
+  private filters = { category: '', search: '' };
 
   browse() {
     document.getElementById('products')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -41,14 +43,27 @@ export class StorePage implements OnInit {
     void this.loadProducts();
   }
 
-  async loadProducts() {
+  async loadProducts(append = false) {
+    const cursor = append ? this.nextCursor() : null;
+    if (append && (!cursor || this.loading())) return;
+    if (!append) {
+      this.filters = { category: this.category, search: this.search };
+      this.nextCursor.set(null);
+    }
     const requestId = ++this.latestRequestId;
     this.loading.set(true);
     this.error.set('');
     try {
-      const products = await this.api.products(this.category, this.search);
+      const page = await this.api.products(
+        this.filters.category,
+        this.filters.search,
+        cursor ?? undefined,
+      );
       if (requestId === this.latestRequestId) {
-        this.products.set(products);
+        this.products.update((products) =>
+          append ? [...products, ...page.products] : page.products,
+        );
+        this.nextCursor.set(page.nextCursor ?? null);
       }
     } catch (error) {
       if (requestId === this.latestRequestId) {

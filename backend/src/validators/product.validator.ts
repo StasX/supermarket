@@ -8,7 +8,7 @@ export function isProductCategory(value: unknown): value is string {
 
 export function validateProductSearch(body?: SearchInput) {
   const name = body?.product ?? body?.name;
-  return typeof name === 'string' && name.length ? name : null;
+  return typeof name === 'string' && name.length && name.length <= 150 ? name : null;
 }
 
 export function validateProduct(body: ProductInput | undefined, edit: boolean) {
@@ -17,6 +17,7 @@ export function validateProduct(body: ProductInput | undefined, edit: boolean) {
   if (
     typeof name !== 'string' ||
     !name.length ||
+    name.length > 150 ||
     !isProductCategory(category) ||
     !isValidPrice(price) ||
     (edit && !productId)

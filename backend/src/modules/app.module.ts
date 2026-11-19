@@ -12,6 +12,7 @@ import { CartsService } from '../services/carts.service';
 import { CheckoutService } from '../services/checkout.service';
 import { SessionGuard } from '../guards/session.guard';
 import { ImageStorageService } from '../services/image-storage.service';
+import { ProductImageCleanupService } from '../services/product-image-cleanup.service';
 import { InvoiceService } from '../services/invoice.service';
 import { AuthRateLimitGuard } from '../guards/auth-rate-limit.guard';
 import { AuthRateLimitStore } from '../stores/auth-rate-limit.store';
@@ -47,6 +48,7 @@ import { CsrfGuard } from '../guards/csrf.guard';
     AuthRateLimitGuard,
     AuthRateLimitStore,
     ImageStorageService,
+    ProductImageCleanupService,
     InvoiceService,
   ],
 })

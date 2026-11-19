@@ -40,6 +40,8 @@ const Product = require('../dist/models/Product');
 const RevokedSession = require('../dist/models/RevokedSession');
 const User = require('../dist/models/User');
 const { ImageStorageService } = require('../dist/services/image-storage.service');
+const { ProductImageCleanupService } = require('../dist/services/product-image-cleanup.service');
+const { CheckoutService } = require('../dist/services/checkout.service');
 const { createInvoice } = require('../dist/utils/invoice');
 const { CsrfService } = require('../dist/services/csrf.service');
 const images = new Map<string, Buffer>();
@@ -101,11 +103,14 @@ const customer = {
 const admin = { ...customer, _id: '507f1f77bcf86cd799439012', role: 1 };
 const key = 'test-only-session-signing-key';
 let app: INestApplication;
-type Collection = 'users' | 'products' | 'carts' | 'orders' | 'revokedSessions';
+type Collection =
+  'users' | 'products' | 'carts' | 'orders' | 'revokedSessions' | 'productImageDeletions';
 type ModelMethod =
+  | 'aggregate'
   | 'find'
   | 'findOne'
   | 'create'
+  | 'deleteOne'
   | 'countDocuments'
   | 'findByIdAndUpdate'
   | 'findByIdAndDelete'
@@ -384,6 +389,24 @@ test('checkout rejects another customer cart or an empty cart', async () => {
   expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
 });
 
+test('checkout rejects duplicate reviewed product IDs without closing the cart', async () => {
+  const products = [
+    { id: admin._id, count: 1, price: 5.25 },
+    { id: customer._id, count: 1, price: 4.75 },
+  ];
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
+  models.products.find.mockResolvedValue(products.map(({ id, price }) => ({ _id: id, price })));
+  const item = { id: admin._id, count: 1, unitPriceCents: 525 };
+  const response = await api()
+    .post('/api/orders/checkout')
+    .set('Cookie', cookie())
+    .send({ ...checkoutBody, reviewedItems: [item, item] })
+    .expect(200);
+  expect(response.body).toMatchObject({ success: false, review: { products } });
+  expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
+});
+
 test('checkout requires a new review when line prices change even if the total matches', async () => {
   const products = [
     { id: admin._id, count: 1, price: 5.25 },
@@ -488,6 +511,13 @@ test.each(['after cart closure', 'before order insert', 'after order insert'])(
     expect(cart.status).toBe(0);
     expect(cart.checkout.price).toBe(10.5);
     const frozenSnapshot = structuredClone(cart.checkout);
+
+    models.carts.aggregate.mockImplementation(async () =>
+      order ? [] : [{ checkout: frozenSnapshot }],
+    );
+    await app.get(CheckoutService).recoverPendingOrders();
+    expect(order).toMatchObject(frozenSnapshot);
+    expect(orderCreates).toBe(1);
 
     // Neither later catalog edits nor a changed retry payload may change a closed
     // cart's snapshot. Repeating checkout must return the same saved order.
@@ -603,6 +633,7 @@ test('invoice downloads return the stored PDF without regeneration or catalog qu
 test('invoice storage failures can be retried independently of checkout', async () => {
   const snapshot = {
     user_id: customer.id,
+    cart_id: customer._id,
     price: 12,
     products: [{ id: admin._id, name: 'Frozen product name', count: 2, price: 6 }],
     shipping: checkoutBody.shipping,
@@ -750,23 +781,29 @@ beforeAll(async () => {
   process.env['JWT_KEY_PATH'] = path.join(directory, 'session.key');
   fs.writeFileSync(process.env['JWT_KEY_PATH'], key);
   models = Object.fromEntries(
-    ['users', 'products', 'orders', 'carts', 'revokedSessions'].map((name) => [
-      name,
-      Object.fromEntries(
-        [
-          'find',
-          'findOne',
-          'create',
-          'countDocuments',
-          'findByIdAndUpdate',
-          'findByIdAndDelete',
-          'findOneAndUpdate',
-          'exists',
-          'updateOne',
-        ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
-      ),
-    ]),
+    ['users', 'products', 'orders', 'carts', 'revokedSessions', 'productImageDeletions'].map(
+      (name) => [
+        name,
+        Object.fromEntries(
+          [
+            'aggregate',
+            'find',
+            'findOne',
+            'create',
+            'deleteOne',
+            'countDocuments',
+            'findByIdAndUpdate',
+            'findByIdAndDelete',
+            'findOneAndUpdate',
+            'exists',
+            'updateOne',
+          ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
+        ),
+      ],
+    ),
   ) as MockModels;
+  Object.assign(models.orders, { collection: { name: 'orders' } });
+  models.carts.aggregate.mockResolvedValue([]);
   const adapter = new ExpressAdapter();
   const adapterHost = new HttpAdapterHost();
   adapterHost.httpAdapter = adapter;
@@ -809,6 +846,7 @@ beforeEach(() => {
   rateBuckets.clear();
   authRateLimiter = new AuthRateLimitGuard(rateStore);
   jest.resetAllMocks();
+  models.carts.aggregate.mockResolvedValue([]);
   const revokedSessions = new Set<string>();
   models.revokedSessions.exists.mockImplementation(async ({ _id }) => revokedSessions.has(_id));
   models.revokedSessions.updateOne.mockImplementation(async ({ _id }) => revokedSessions.add(_id));
@@ -965,12 +1003,36 @@ test('a product save detects the file format and only serves owned uploads', asy
   const { image } = models.products.create.mock.calls[0][0];
   expect(image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
   await api().get(image).expect(404);
-  models.products.exists.mockResolvedValueOnce({ _id: customer._id });
+  models.products.exists
+    .mockResolvedValueOnce({ _id: customer._id })
+    .mockResolvedValueOnce({ _id: customer._id });
   const served = await api()
     .get(image)
     .expect(200)
     .expect('Content-Type', /image\/png/);
   expect(served.body.equals(fs.readFileSync(productImageFile))).toBe(true);
+});
+
+test('an image read that overlaps product deletion discards the opened stream', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  const stream = Readable.from([Buffer.from('old image')]);
+  models.products.exists.mockResolvedValueOnce({ _id: customer._id });
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image });
+  const get = jest.spyOn(app.get(ImageStorageService), 'get').mockImplementationOnce(async () => {
+    await api()
+      .post('/api/products/delete')
+      .set('Cookie', cookie(admin))
+      .send({ id: customer._id })
+      .expect(200);
+    return stream;
+  });
+  try {
+    await api().get(image).expect(404);
+    expect(stream.destroyed).toBe(true);
+  } finally {
+    get.mockRestore();
+  }
 });
 
 test('missing uploaded images return 404', async () => {
@@ -1047,6 +1109,54 @@ test('replacing and deleting a product remove the respective managed images', as
   expect(images.size).toBe(0);
 });
 
+test('cleanup preserves an image that still has a product reference', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  images.set(filename, Buffer.from('owned image'));
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image });
+  models.products.exists.mockResolvedValueOnce({ _id: admin._id });
+  const result = await api()
+    .post('/api/products/delete')
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id })
+    .expect(200);
+  expect(result.body).toEqual({ success: true });
+  expect(models.products.exists).toHaveBeenCalledWith({ image });
+  expect(images.has(filename)).toBe(true);
+});
+
+test('failed image cleanup is queued and a later retry removes the object and job', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  images.set(filename, Buffer.from('old image'));
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image });
+  const storage = app.get(ImageStorageService);
+  const remove = jest
+    .spyOn(storage, 'deleteProductImage')
+    .mockRejectedValueOnce(new Error('Unavailable'));
+  try {
+    const response = await api()
+      .post('/api/products/delete')
+      .set('Cookie', cookie(admin))
+      .send({ id: customer._id })
+      .expect(200);
+    expect(response.body).toEqual({ success: true });
+    const queue = models.productImageDeletions;
+    expect(queue.updateOne).toHaveBeenCalledWith(
+      { _id: filename },
+      { $setOnInsert: { nextAttemptAt: expect.any(Date) } },
+      { upsert: true, runValidators: true },
+    );
+    expect(images.has(filename)).toBe(true);
+    queue.findOneAndUpdate.mockResolvedValueOnce({ _id: filename, attempts: 1 });
+    await app.get(ProductImageCleanupService).retryPending();
+    expect(queue.deleteOne).toHaveBeenCalledWith({ _id: filename, attempts: 1 });
+    expect(images.has(filename)).toBe(false);
+  } finally {
+    remove.mockRestore();
+  }
+});
+
 test('an existing upload can only be retained by the product that owns it', async () => {
   const image = '/products/uploads/00000000-0000-0000-0000-000000000001.png';
   const create = await api()
@@ -1098,6 +1208,7 @@ test('listing, filtering, and search return the same public product fields', asy
     products: [
       { id: 'p1', name: 'Juice', price: 10, image: 'juice.png', category: 'Wine & Drinks' },
     ],
+    nextCursor: null,
   });
   for (const [route, body] of [
     ['/api/products/by-category', { category: 'Wine & Drinks' }],
@@ -1112,7 +1223,28 @@ test('listing handles an empty collection', async () => {
   expect((await api().get('/api/products').set('Cookie', cookie())).body).toEqual({
     success: true,
     products: [],
+    nextCursor: null,
   });
+});
+
+test('catalog pages are bounded and use the last returned ID as a cursor', async () => {
+  const rows = Array.from({ length: 25 }, (_, index) => ({
+    _id: index.toString(16).padStart(24, '0'),
+    name: `Product ${index}`,
+  }));
+  models.products.find.mockResolvedValueOnce(rows).mockResolvedValueOnce(rows.slice(24));
+  const first = await api().get('/api/products').set('Cookie', cookie()).expect(200);
+  expect(first.body.products).toHaveLength(24);
+  expect(first.body.nextCursor).toBe(rows[23]._id);
+  const next = await api()
+    .get('/api/products')
+    .query({ after: first.body.nextCursor })
+    .set('Cookie', cookie())
+    .expect(200);
+  expect(next.body.products).toHaveLength(1);
+  expect(next.body.nextCursor).toBeNull();
+  expect(models.products.find.mock.calls[1][0]).toEqual({ _id: { $gt: rows[23]._id } });
+  expect(models.products.find.mock.calls[1][2]).toMatchObject({ sort: { _id: 1 }, limit: 25 });
 });
 
 test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async (category) => {
@@ -1122,10 +1254,10 @@ test.each(['Wine & Drinks', 'invalid'])('category lookup validates %s', async (c
     .send({ category })
     .expect(200);
   expect(result.body).toEqual(
-    category === 'invalid' ? { success: false } : { success: true, products: [] },
+    category === 'invalid' ? { success: false } : { success: true, products: [], nextCursor: null },
   );
   if (category === 'invalid') expect(models.products.find).not.toHaveBeenCalled();
-  else expect(models.products.find).toHaveBeenCalledWith({ category });
+  else expect(models.products.find.mock.calls[0][0]).toEqual({ category });
 });
 
 for (const [route, collection] of [
@@ -1455,9 +1587,11 @@ test('search accepts the frontend product field and escapes regex characters', a
     .set('Cookie', cookie())
     .send({ product: 'Juice (1L)' })
     .expect(200);
-  const expression = models.products.find.mock.calls[0][0].name;
-  expect(expression.test('Juice (1L)')).toBe(true);
-  expect(expression.test('Juice 1L')).toBe(false);
+  const query = models.products.find.mock.calls[0][0];
+  expect(query.searchGrams).toBe('jui');
+  expect(query.searchName.ignoreCase).toBe(false);
+  expect(query.searchName.test('apple juice (1l)')).toBe(true);
+  expect(query.searchName.test('juice 1l')).toBe(false);
 });
 
 test.each(['0.00', '10.99', '001.25', 10.99])('admin can save price %j', async (price) => {
@@ -1509,7 +1643,9 @@ test('admin can add a valid product', async () => {
     (await api().post('/api/products/create').set('Cookie', cookie(admin)).send(body).expect(200))
       .body,
   ).toEqual({ success: true });
-  expect(models.products.create).toHaveBeenCalledWith({ ...body, price: Number(body.price) });
+  expect(models.products.create).toHaveBeenCalledWith(
+    expect.objectContaining({ ...body, price: Number(body.price), searchName: 'juice' }),
+  );
 });
 
 test('admin can edit a product', async () => {
@@ -1594,7 +1730,7 @@ test('order history returns a response even when no orders exist', async () => {
     order: null,
   });
   expect(models.orders.findOne).toHaveBeenCalledWith({ user_id: customer.id });
-  expect(sort).toHaveBeenCalledWith({ _id: -1 });
+  expect(sort).toHaveBeenCalledWith({ created_at: -1, _id: -1 });
 });
 
 describe.each(['api/carts', 'api/carts/update'])('%s validates cart contents', (route) => {
