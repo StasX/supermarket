@@ -267,8 +267,8 @@ test('admin product writes persist, validate input, and enforce customer permiss
   assert.equal(await Product.countDocuments({}), 0);
   assert.equal((await add({ ...product, category: 'Invalid' })).body.success, false);
   assert.equal((await add({ ...product, price: '4' })).body.success, false);
-  assert.equal((await add(product)).body.success, true);
-  assert.equal((await add(product)).body.success, false);
+  const additions = await Promise.all([add(product), add({ ...product, image: 'other-milk.png' })]);
+  assert.deepEqual(additions.map(({ body }) => body.success).sort(), [false, true]);
   const stored = await Product.findOne({ name: product.name });
   assert.equal(stored.price, 4.5);
   const edit = { ...product, id: String(stored._id), price: '5.25' };

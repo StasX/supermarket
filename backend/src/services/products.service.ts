@@ -86,15 +86,19 @@ export class ProductsService {
       price: Number(body.price),
       ...(typeof body.image === 'string' ? { image: body.image } : {}),
     };
-    if (edit) {
-      const updated = await this.models.products.findByIdAndUpdate(body.id, { $set: product });
-      return { success: Boolean(updated) };
+    try {
+      if (edit) {
+        const updated = await this.models.products.findByIdAndUpdate(body.id, { $set: product });
+        return { success: Boolean(updated) };
+      }
+      await this.models.products.create(product);
+      return { success: true };
+    } catch (error) {
+      if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
+        return { success: false };
+      }
+      throw error;
     }
-    if (await this.models.products.findOne({ name: body.name })) {
-      return { success: false };
-    }
-    await this.models.products.create(product);
-    return { success: true };
   }
 
   async deleteProduct(body: Pick<ProductInput, 'id'>) {

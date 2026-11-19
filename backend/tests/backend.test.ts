@@ -1346,6 +1346,22 @@ test('admin can edit a product', async () => {
   ).toEqual({ success: true });
 });
 
+test.each([
+  ['add-product', 'create'],
+  ['edit-product', 'findByIdAndUpdate'],
+] as const)('admin product writes report duplicate key conflicts on %s', async (route, method) => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.products[method].mockRejectedValueOnce(
+    new MongoServerError({ code: 11000, message: 'duplicate key', keyPattern: { name: 1 } }),
+  );
+  const response = await api()
+    .post(`/${route}`)
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id, name: 'Juice', category: 'Wine & Drinks', price: '10.00' })
+    .expect(200);
+  expect(response.body).toEqual({ success: false });
+});
+
 test('cart updates enforce ownership and open status', async () => {
   models.carts.findOneAndUpdate.mockResolvedValue(null);
   const result = await api()

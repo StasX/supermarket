@@ -23,6 +23,7 @@ class DatabaseLifecycle implements OnApplicationShutdown {
       useFactory: async () => {
         await mongoose.connect(process.env['MONGODB_URI'] || 'mongodb://localhost:27017/shop');
         await User.createIndexes();
+        await Product.createIndexes();
         // Do not accept requests until MongoDB enforces one open cart per user.
         await Cart.createIndexes();
         await Order.createIndexes();
