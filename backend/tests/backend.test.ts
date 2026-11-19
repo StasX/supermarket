@@ -40,6 +40,7 @@ const Product = require('../dist/models/Product');
 const RevokedSession = require('../dist/models/RevokedSession');
 const User = require('../dist/models/User');
 const { ImageStorageService } = require('../dist/services/image-storage.service');
+const { CheckoutService } = require('../dist/services/checkout.service');
 const { createInvoice } = require('../dist/utils/invoice');
 const { CsrfService } = require('../dist/services/csrf.service');
 const images = new Map<string, Buffer>();
@@ -103,6 +104,7 @@ const key = 'test-only-session-signing-key';
 let app: INestApplication;
 type Collection = 'users' | 'products' | 'carts' | 'orders' | 'revokedSessions';
 type ModelMethod =
+  | 'aggregate'
   | 'find'
   | 'findOne'
   | 'create'
@@ -489,6 +491,13 @@ test.each(['after cart closure', 'before order insert', 'after order insert'])(
     expect(cart.checkout.price).toBe(10.5);
     const frozenSnapshot = structuredClone(cart.checkout);
 
+    models.carts.aggregate.mockImplementation(async () =>
+      order ? [] : [{ checkout: frozenSnapshot }],
+    );
+    await app.get(CheckoutService).recoverPendingOrders();
+    expect(order).toMatchObject(frozenSnapshot);
+    expect(orderCreates).toBe(1);
+
     // Neither later catalog edits nor a changed retry payload may change a closed
     // cart's snapshot. Repeating checkout must return the same saved order.
     models.products.find.mockResolvedValue([{ _id: admin._id, name: 'Changed juice', price: 99 }]);
@@ -603,6 +612,7 @@ test('invoice downloads return the stored PDF without regeneration or catalog qu
 test('invoice storage failures can be retried independently of checkout', async () => {
   const snapshot = {
     user_id: customer.id,
+    cart_id: customer._id,
     price: 12,
     products: [{ id: admin._id, name: 'Frozen product name', count: 2, price: 6 }],
     shipping: checkoutBody.shipping,
@@ -754,6 +764,7 @@ beforeAll(async () => {
       name,
       Object.fromEntries(
         [
+          'aggregate',
           'find',
           'findOne',
           'create',
@@ -767,6 +778,8 @@ beforeAll(async () => {
       ),
     ]),
   ) as MockModels;
+  Object.assign(models.orders, { collection: { name: 'orders' } });
+  models.carts.aggregate.mockResolvedValue([]);
   const adapter = new ExpressAdapter();
   const adapterHost = new HttpAdapterHost();
   adapterHost.httpAdapter = adapter;
@@ -809,6 +822,7 @@ beforeEach(() => {
   rateBuckets.clear();
   authRateLimiter = new AuthRateLimitGuard(rateStore);
   jest.resetAllMocks();
+  models.carts.aggregate.mockResolvedValue([]);
   const revokedSessions = new Set<string>();
   models.revokedSessions.exists.mockImplementation(async ({ _id }) => revokedSessions.has(_id));
   models.revokedSessions.updateOne.mockImplementation(async ({ _id }) => revokedSessions.add(_id));
@@ -1634,7 +1648,7 @@ test('order history returns a response even when no orders exist', async () => {
     order: null,
   });
   expect(models.orders.findOne).toHaveBeenCalledWith({ user_id: customer.id });
-  expect(sort).toHaveBeenCalledWith({ _id: -1 });
+  expect(sort).toHaveBeenCalledWith({ created_at: -1, _id: -1 });
 });
 
 describe.each(['api/carts', 'api/carts/update'])('%s validates cart contents', (route) => {
