@@ -1581,6 +1581,14 @@ test.each([
   { email: { $ne: null }, id: '123456789' },
   { email: 'buyer@example.com', id: { $ne: null } },
   { email: 'invalid', id: '1' },
+  ...[
+    '@example.com',
+    'buyer@@example.com',
+    'buyer@example',
+    'buyer@.com',
+    'buyer@example.',
+    'buyer@example.com\n',
+  ].map((email) => ({ email, id: '123456789' })),
 ])('signup availability rejects malformed input %j', async (body) => {
   const response = await api().post('/api/auth/signup/availability').send(body).expect(200);
   expect(response.body.available).toBe(false);

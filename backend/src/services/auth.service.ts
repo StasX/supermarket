@@ -208,5 +208,12 @@ export class AuthService {
 }
 
 function email(value: unknown): value is string {
-  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (typeof value !== 'string' || /\s/.test(value)) return false;
+
+  const at = value.indexOf('@');
+  if (at < 1 || value.indexOf('@', at + 1) !== -1) return false;
+
+  // The domain needs a dot with at least one character on either side.
+  const dot = value.indexOf('.', at + 2);
+  return dot !== -1 && dot < value.length - 1;
 }
