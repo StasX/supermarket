@@ -96,7 +96,7 @@ const customer = {
 const admin = { ...customer, _id: '507f1f77bcf86cd799439012', role: 1 };
 const key = 'test-only-session-signing-key';
 let app: INestApplication;
-type Collection = 'users' | 'products' | 'carts' | 'orders';
+type Collection = 'users' | 'products' | 'carts' | 'orders' | 'revokedSessions';
 type ModelMethod =
   | 'find'
   | 'findOne'
@@ -104,7 +104,9 @@ type ModelMethod =
   | 'countDocuments'
   | 'findByIdAndUpdate'
   | 'findByIdAndDelete'
-  | 'findOneAndUpdate';
+  | 'findOneAndUpdate'
+  | 'exists'
+  | 'updateOne';
 type MockModels = Record<Collection, Record<ModelMethod, jest.Mock<(...args: any[]) => any>>>;
 let models: MockModels;
 let directory: string;
@@ -727,7 +729,7 @@ beforeAll(async () => {
   process.env['JWT_KEY_PATH'] = path.join(directory, 'session.key');
   fs.writeFileSync(process.env['JWT_KEY_PATH'], key);
   models = Object.fromEntries(
-    ['users', 'products', 'orders', 'carts'].map((name) => [
+    ['users', 'products', 'orders', 'carts', 'revokedSessions'].map((name) => [
       name,
       Object.fromEntries(
         [
@@ -738,6 +740,8 @@ beforeAll(async () => {
           'findByIdAndUpdate',
           'findByIdAndDelete',
           'findOneAndUpdate',
+          'exists',
+          'updateOne',
         ].map((method) => [method, jest.fn<(...args: any[]) => any>()]),
       ),
     ]),
@@ -781,6 +785,9 @@ beforeEach(() => {
   rateBuckets.clear();
   authRateLimiter = new AuthRateLimitGuard(rateStore);
   jest.resetAllMocks();
+  const revokedSessions = new Set<string>();
+  models.revokedSessions.exists.mockImplementation(async ({ _id }) => revokedSessions.has(_id));
+  models.revokedSessions.updateOne.mockImplementation(async ({ _id }) => revokedSessions.add(_id));
   images.clear();
   invoiceWrite.mockImplementation(async (id: string, bytes: Buffer) => {
     if (!images.has(`invoices/${id}.pdf`)) images.set(`invoices/${id}.pdf`, bytes);
@@ -951,11 +958,21 @@ for (const [route, collection, field] of [
   });
 }
 
-test('logout clears the session cookie', async () => {
-  const result = await api().post('/logout').set('Cookie', cookie()).expect(200);
-  expect(result.body).toEqual({ success: true });
-  expect(result.headers['set-cookie'][0]).toMatch(/SESSIONID=;.*Expires=Thu, 01 Jan 1970/);
-});
+test.each([true, false])(
+  'logout clears and revokes the session cookie (expiration: %s)',
+  async (expiring) => {
+    const session = expiring
+      ? cookie()
+      : `SESSIONID=${jwt.sign({ data: JSON.stringify(customer) }, key)}`;
+    const otherSession = cookie(customer, { jwtid: 'other-session' });
+    await api().get('/reconect').set('Cookie', session).expect(200);
+    const result = await api().post('/logout').set('Cookie', session).expect(200);
+    expect(result.body).toEqual({ success: true });
+    expect(result.headers['set-cookie'][0]).toMatch(/SESSIONID=;.*Expires=Thu, 01 Jan 1970/);
+    await api().get('/reconect').set('Cookie', session).expect(401);
+    await api().get('/reconect').set('Cookie', otherSession).expect(200);
+  },
+);
 
 for (const [method, route, allowedRole] of [
   ['post', 'add-product', 1],
@@ -1327,6 +1344,22 @@ test('admin can edit a product', async () => {
         .expect(200)
     ).body,
   ).toEqual({ success: true });
+});
+
+test.each([
+  ['add-product', 'create'],
+  ['edit-product', 'findByIdAndUpdate'],
+] as const)('admin product writes report duplicate key conflicts on %s', async (route, method) => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.products[method].mockRejectedValueOnce(
+    new MongoServerError({ code: 11000, message: 'duplicate key', keyPattern: { name: 1 } }),
+  );
+  const response = await api()
+    .post(`/${route}`)
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id, name: 'Juice', category: 'Wine & Drinks', price: '10.00' })
+    .expect(200);
+  expect(response.body).toEqual({ success: false });
 });
 
 test('cart updates enforce ownership and open status', async () => {

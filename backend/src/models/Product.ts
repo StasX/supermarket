@@ -5,7 +5,10 @@ const productSchema = new Schema({
         type : Number,
         sparce : true  
     },*/
-  name: String,
+  name: {
+    type: String,
+    unique: true,
+  },
   category: String,
   price: Number,
   image: {

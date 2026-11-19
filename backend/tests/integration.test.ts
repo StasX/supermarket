@@ -267,8 +267,8 @@ test('admin product writes persist, validate input, and enforce customer permiss
   assert.equal(await Product.countDocuments({}), 0);
   assert.equal((await add({ ...product, category: 'Invalid' })).body.success, false);
   assert.equal((await add({ ...product, price: '4' })).body.success, false);
-  assert.equal((await add(product)).body.success, true);
-  assert.equal((await add(product)).body.success, false);
+  const additions = await Promise.all([add(product), add({ ...product, image: 'other-milk.png' })]);
+  assert.deepEqual(additions.map(({ body }) => body.success).sort(), [false, true]);
   const stored = await Product.findOne({ name: product.name });
   assert.equal(stored.price, 4.5);
   const edit = { ...product, id: String(stored._id), price: '5.25' };
@@ -533,13 +533,17 @@ test('administrator uploads persist in MinIO and are publicly served by the app'
   assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
 });
 
-test('logout expires the browser session cookie', async () => {
+test('logout expires the browser session cookie and rejects the revoked session', async () => {
   const logout = await request('/logout', { method: 'POST', cookie: customerCookie });
   assert.equal(logout.body.success, true);
   assert.ok(logout.cookie, 'Logout must expire the session cookie');
   assert.match(logout.cookie, /SESSIONID=;/);
   assert.match(logout.cookie, /Expires=Thu, 01 Jan 1970/);
   assert.equal((await request('/reconect', { status: 401 })).body.success, false);
+  assert.equal(
+    (await request('/reconect', { cookie: customerCookie, status: 401 })).body.success,
+    false,
+  );
 });
 
 test('only administrators can delete products and deletion persists in MongoDB', async () => {
