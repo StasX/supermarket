@@ -1,19 +1,19 @@
 import mongoose from 'mongoose';
-const Schema = mongoose.Schema;
-const productSchema = new Schema({
-  /*_id : {
-        type : Number,
-        sparce : true  
-    },*/
-  name: {
-    type: String,
-    unique: true,
+import { productCategories } from '../config/product-categories';
+
+const productSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, unique: true },
+    category: { type: String, required: true, enum: productCategories },
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+      validate: Number.isFinite,
+    },
+    image: { type: String, unique: true },
   },
-  category: String,
-  price: Number,
-  image: {
-    type: String,
-    unique: true,
-  },
-});
+  { strict: 'throw' },
+);
+
 export = mongoose.model('products', productSchema);

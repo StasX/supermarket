@@ -102,7 +102,7 @@ export class CheckoutService {
       const closed = await this.models.carts.findOneAndUpdate(
         { _id: cart._id, user_id: user.id, status: 1, products: cart.products },
         { $set: { status: 0, checkout: snapshot } },
-        { returnDocument: 'after' },
+        { returnDocument: 'after', runValidators: true },
       );
       cart = closed || (await this.models.carts.findOne({ _id: cartId, user_id: user.id }));
     }
@@ -114,8 +114,8 @@ export class CheckoutService {
     try {
       order = await this.models.orders.findOneAndUpdate(
         query,
-        { $setOnInsert: cart.checkout },
-        { upsert: true, returnDocument: 'after' },
+        { $setOnInsert: cart.toObject?.().checkout ?? cart.checkout },
+        { upsert: true, returnDocument: 'after', runValidators: true },
       );
     } catch (error) {
       if (!(error instanceof mongoose.mongo.MongoServerError) || error.code !== 11000) {

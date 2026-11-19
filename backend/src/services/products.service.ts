@@ -2,8 +2,8 @@ import { CategoryInput, SearchInput, ProductInput, record } from '../types/contr
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
+import { productCategories } from '../config/product-categories';
 
-const categories = ['Milk & Eggs', 'Vegetables & Fruits', 'Meet & Fish', 'Wine & Drinks'];
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
 
@@ -48,7 +48,7 @@ export class ProductsService {
   }
 
   async category(body: CategoryInput) {
-    if (typeof body.category !== 'string' || !categories.includes(body.category)) {
+    if (typeof body.category !== 'string' || !productCategories.includes(body.category)) {
       return { success: false };
     }
     return {
@@ -74,7 +74,7 @@ export class ProductsService {
       typeof body.name !== 'string' ||
       !body.name.length ||
       typeof body.category !== 'string' ||
-      !categories.includes(body.category) ||
+      !productCategories.includes(body.category) ||
       !isValidPrice(body.price) ||
       (edit && !isValidProductOrCartId(body.id))
     ) {
@@ -88,7 +88,11 @@ export class ProductsService {
     };
     try {
       if (edit) {
-        const updated = await this.models.products.findByIdAndUpdate(body.id, { $set: product });
+        const updated = await this.models.products.findByIdAndUpdate(
+          body.id,
+          { $set: product },
+          { runValidators: true },
+        );
         return { success: Boolean(updated) };
       }
       await this.models.products.create(product);

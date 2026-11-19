@@ -83,7 +83,7 @@ export class AuthService {
     await this.models.revokedSessions.updateOne(
       { _id: session.id },
       { $setOnInsert: { expiresAt: session.expiresAt } },
-      { upsert: true },
+      { upsert: true, runValidators: true },
     );
   }
 
@@ -98,7 +98,7 @@ export class AuthService {
     const previous = await this.models.users.findOneAndUpdate(
       { _id: user._id },
       { $set: { has_logged_in: true } },
-      { returnDocument: 'before' },
+      { returnDocument: 'before', runValidators: true },
     );
     if (!previous) {
       throw new HttpException({ success: false }, 401);

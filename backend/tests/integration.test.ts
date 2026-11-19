@@ -115,6 +115,7 @@ before(
       username: 'admin@example.com',
       password: bcrypt.hashSync(password, bcrypt.genSaltSync(4)),
       name: { first_name: 'Admin', last_name: 'User' },
+      address: { city: 'Tel Aviv', street: 'Ha Masger 10' },
       role: 1,
     });
     temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'shop-integration-'));
@@ -369,16 +370,17 @@ test('concurrent cart creation allows one open cart while preserving closed cart
   assert.equal(await Cart.countDocuments({ user_id: userId, status: 1 }), 1);
   assert.equal(await Cart.countDocuments({ user_id: userId, status: 0 }), closedCount);
   await assert.rejects(
-    Cart.create({ user_id: userId, products: [], status: 1 }),
+    Cart.create({ user_id: userId, products: [], created_at: new Date(), status: 1 }),
     (error: any) => error.code === 11000,
   );
-  await Cart.create({ user_id: userId + 1, products: [], status: 1 });
+  await Cart.create({ user_id: userId + 1, products: [], created_at: new Date(), status: 1 });
 });
 
 test('checkout saves shipping and demo payment once, closes the cart, and survives retries', async () => {
   const cart = await Cart.findOne({ user_id: Number(registration.id), status: 1 });
   const product = await Product.findOne({});
-  await Cart.updateOne(
+  // Simulate a stale price already stored in MongoDB outside the validated model writes.
+  await Cart.collection.updateOne(
     { _id: cart._id },
     { $set: { products: [{ id: String(product._id), count: 2, price: -1 }] } },
   );

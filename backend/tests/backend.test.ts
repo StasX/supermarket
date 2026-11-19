@@ -34,6 +34,11 @@ const rateStore = {
 };
 let authRateLimiter = new AuthRateLimitGuard(rateStore);
 const { MODELS } = require('../dist/modules/database.module');
+const Cart = require('../dist/models/Cart');
+const Order = require('../dist/models/Order');
+const Product = require('../dist/models/Product');
+const RevokedSession = require('../dist/models/RevokedSession');
+const User = require('../dist/models/User');
 const { ImageStorageService } = require('../dist/services/image-storage.service');
 const { createInvoice } = require('../dist/utils/invoice');
 const { CsrfService } = require('../dist/services/csrf.service');
@@ -613,6 +618,7 @@ test('checkout recovers from invoice storage failure without creating another or
   expect(models.orders.findOneAndUpdate).toHaveBeenLastCalledWith(
     { _id: customer._id },
     { $set: { invoiceKey: `invoices/${customer._id}.pdf` } },
+    { runValidators: true },
   );
 });
 
@@ -807,6 +813,75 @@ afterAll(async () => {
     fs.unlinkSync(path.join(directory, 'session.key'));
     fs.rmdirSync(directory);
   }
+});
+
+describe('MongoDB model schemas', () => {
+  const item = { id: '507f1f77bcf86cd799439013', count: 2, price: 2.5 };
+  const cart = { user_id: 123456789, products: [item], created_at: new Date() };
+  const snapshot = {
+    ...cart,
+    products: [{ ...item, name: 'Milk' }],
+    username: 'shopper@example.com',
+    cart_id: '507f1f77bcf86cd799439014',
+    price: 5,
+    shipping: { city: 'Tel Aviv', street: 'Herzl', date: new Date() },
+    payment: { mode: 'demo', method: 'credit_card', last4: '0042' },
+  };
+
+  test('checkout snapshot round-trips as an order and keeps the original line-item shape', async () => {
+    const closed = new Cart({ ...cart, status: 0, checkout: snapshot });
+    await closed.validate();
+    const stored = closed.toObject();
+    expect(stored.products).toEqual(cart.products);
+    expect(stored.checkout).toEqual(snapshot);
+    await expect(new Order(stored.checkout).validate()).resolves.toBeUndefined();
+    await expect(new Cart({ ...cart, products: [] }).validate()).resolves.toBeUndefined();
+  });
+
+  test('carts reject invalid line items, duplicated items, and invalid status', async () => {
+    await expect(
+      new Cart({ ...cart, products: [{ ...item, count: 1.5 }], status: 2 }).validate(),
+    ).rejects.toMatchObject({
+      errors: { 'products.0.count': expect.anything(), status: expect.anything() },
+    });
+    await expect(new Cart({ ...cart, products: [item, item] }).validate()).rejects.toMatchObject({
+      errors: { products: expect.anything() },
+    });
+  });
+
+  test('orders and checkout snapshots reject malformed payment metadata', async () => {
+    const checkout = { ...snapshot, payment: { ...snapshot.payment, last4: '12345' } };
+    await expect(new Order(checkout).validate()).rejects.toMatchObject({
+      errors: { 'payment.last4': expect.anything() },
+    });
+    await expect(new Cart({ ...cart, checkout }).validate()).rejects.toMatchObject({
+      errors: { 'checkout.payment.last4': expect.anything() },
+    });
+    expect(
+      () => new Order({ ...snapshot, payment: { ...snapshot.payment, cardNumber: '12345' } }),
+    ).toThrow(/cardNumber/);
+  });
+
+  test('products, users and session revocations enforce their field constraints', async () => {
+    await expect(new Product({ category: 'Unknown', price: -1 }).validate()).rejects.toMatchObject({
+      errors: { name: expect.anything(), category: expect.anything(), price: expect.anything() },
+    });
+    await expect(new User({ id: 1.5, role: 5 }).validate()).rejects.toMatchObject({
+      errors: {
+        id: expect.anything(),
+        role: expect.anything(),
+        username: expect.anything(),
+        'name.first_name': expect.anything(),
+        'address.city': expect.anything(),
+      },
+    });
+    await expect(new RevokedSession({ _id: 'invalid' }).validate()).rejects.toMatchObject({
+      errors: { _id: expect.anything() },
+    });
+    await expect(
+      new RevokedSession({ _id: 'a'.repeat(64), expiresAt: null }).validate(),
+    ).resolves.toBeUndefined();
+  });
 });
 
 test('serves the compiled Angular application', async () => {
@@ -1144,7 +1219,7 @@ test.each([false, true, undefined])(
     expect(models.users.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: customer._id },
       { $set: { has_logged_in: true } },
-      { returnDocument: 'before' },
+      { returnDocument: 'before', runValidators: true },
     );
     const sessionCookie = login.headers['set-cookie'][0].split(';')[0];
     const reconnect = await api().get('/reconect').set('Cookie', sessionCookie).expect(200);
@@ -1373,6 +1448,7 @@ test('cart updates enforce ownership and open status', async () => {
   expect(models.carts.findOneAndUpdate).toHaveBeenCalledWith(
     { _id: customer._id, user_id: customer.id, status: 1 },
     { $set: { products: [] } },
+    { runValidators: true },
   );
 });
 

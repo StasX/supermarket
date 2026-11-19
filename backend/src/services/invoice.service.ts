@@ -17,7 +17,11 @@ export class InvoiceService {
     if (!order.invoiceKey) {
       // Conditional creation preserves the first PDF during retries and concurrent checkouts.
       await this.storage.putInvoice(id, createInvoice(order));
-      await this.models.orders.findOneAndUpdate({ _id: order._id }, { $set: { invoiceKey: key } });
+      await this.models.orders.findOneAndUpdate(
+        { _id: order._id },
+        { $set: { invoiceKey: key } },
+        { runValidators: true },
+      );
     }
     return `/orders/${id}/invoice`;
   }

@@ -48,6 +48,7 @@ export class CartsService {
     const cart = await this.models.carts.findOneAndUpdate(
       { _id: body.id, user_id: user.id, status: 1 },
       { $set: { products } },
+      { runValidators: true },
     );
     return cart ? { success: true, products } : { success: false };
   }
