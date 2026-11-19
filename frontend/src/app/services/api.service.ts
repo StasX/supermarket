@@ -78,25 +78,24 @@ export class ApiService {
     return result.products;
   }
 
-  saveProduct(product: Omit<Product, 'id'> & { id?: string }) {
-    return firstValueFrom(
-      this.http.post<Result>(product.id ? '/api/products/update' : '/api/products/create', {
-        ...product,
-        price: Number(product.price).toFixed(2),
-      }),
-    );
+  saveProduct(product: Omit<Product, 'id'> & { id?: string }, file?: File | null) {
+    const url = product.id ? '/api/products/update' : '/api/products/create';
+    const { id, name, category, image } = product;
+    const price = Number(product.price).toFixed(2);
+    if (!file) {
+      return firstValueFrom(this.http.post<Result>(url, { id, name, category, image, price }));
+    }
+    const body = new FormData();
+    if (id) body.append('id', id);
+    body.append('name', name);
+    body.append('category', category);
+    body.append('price', price);
+    body.append('image', file);
+    return firstValueFrom(this.http.post<Result>(url, body));
   }
 
   deleteProduct(id: string) {
     return firstValueFrom(this.http.post<Result>('/api/products/delete', { id }));
-  }
-
-  uploadProductImage(file: File) {
-    const body = new FormData();
-    body.append('image', file);
-    return firstValueFrom(
-      this.http.post<Result & { image?: string }>('/api/products/images', body),
-    );
   }
 
   cart() {

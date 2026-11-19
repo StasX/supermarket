@@ -1,8 +1,19 @@
 import { CategoryInput, SearchInput, ProductInput, record } from '../types/contracts';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { productCategories } from '../config/product-categories';
+import { ImageStorageService } from './image-storage.service';
+
+const uploadedImagePrefix = '/products/uploads/';
+const uploadedFilenamePattern =
+  /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.(?:png|jpg|webp)$/;
+
+interface ProductImageUpload {
+  bytes: Buffer;
+  extension: 'png' | 'jpg' | 'webp';
+}
 
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
@@ -35,7 +46,22 @@ function productResponse({ _id, name, price, image, category }: ProductRecord) {
 
 @Injectable()
 export class ProductsService {
-  constructor(@Inject(MODELS) private readonly models: DatabaseModels) {}
+  private readonly logger = new Logger(ProductsService.name);
+
+  constructor(
+    @Inject(MODELS) private readonly models: DatabaseModels,
+    private readonly images: ImageStorageService,
+  ) {}
+
+  async productImage(filename: string) {
+    if (
+      !uploadedFilenamePattern.test(filename) ||
+      !(await this.models.products.exists({ image: uploadedImagePrefix + filename }))
+    ) {
+      throw new NotFoundException();
+    }
+    return this.images.get(filename);
+  }
 
   async products() {
     const products: ProductRecord[] = await this.models.products.find({});
@@ -69,9 +95,9 @@ export class ProductsService {
     };
   }
 
-  async saveProduct(body: ProductInput, edit = false) {
+  async saveProduct(body: ProductInput, edit = false, upload?: ProductImageUpload) {
     if (
-      typeof body.name !== 'string' ||
+      typeof body?.name !== 'string' ||
       !body.name.length ||
       typeof body.category !== 'string' ||
       !productCategories.includes(body.category) ||
@@ -80,26 +106,62 @@ export class ProductsService {
     ) {
       return { success: false };
     }
+    const image = typeof body.image === 'string' ? body.image : undefined;
+    const retainUpload = !upload && image?.startsWith(uploadedImagePrefix);
+    // A managed image can only stay on its existing product. Its key is never reused.
+    if (retainUpload && !edit) return { success: false };
+
+    const filename = upload ? `${randomUUID()}.${upload.extension}` : undefined;
+    if (upload && filename) {
+      try {
+        const contentType = upload.extension === 'jpg' ? 'image/jpeg' : `image/${upload.extension}`;
+        await this.images.put(filename, upload.bytes, contentType);
+      } catch (error) {
+        await this.removeUploadedImage(uploadedImagePrefix + filename);
+        throw error;
+      }
+    }
+
+    const nextImage = filename ? uploadedImagePrefix + filename : image;
     const product = {
       name: body.name,
       category: body.category,
       price: Number(body.price),
-      ...(typeof body.image === 'string' ? { image: body.image } : {}),
+      ...(nextImage !== undefined ? { image: nextImage } : {}),
     };
     try {
       if (edit) {
-        const updated = await this.models.products.findByIdAndUpdate(
-          body.id,
-          { $set: product },
-          { runValidators: true },
-        );
-        return { success: Boolean(updated) };
+        const previous = retainUpload
+          ? await this.models.products.findOneAndUpdate(
+              { _id: body.id, image },
+              { $set: product },
+              { returnDocument: 'before', runValidators: true },
+            )
+          : await this.models.products.findByIdAndUpdate(
+              body.id,
+              { $set: product },
+              { returnDocument: 'before', runValidators: true },
+            );
+        if (!previous && filename) await this.removeUploadedImage(product.image);
+        if (previous && product.image !== undefined && previous.image !== product.image) {
+          await this.removeUploadedImage(previous.image);
+        }
+        return { success: Boolean(previous) };
       }
       await this.models.products.create(product);
       return { success: true };
     } catch (error) {
       if (error instanceof mongoose.mongo.MongoServerError && error.code === 11000) {
+        if (filename) await this.removeUploadedImage(product.image);
         return { success: false };
+      }
+      if (filename) {
+        if (error instanceof mongoose.Error.ValidationError) {
+          await this.removeUploadedImage(product.image);
+        } else {
+          // A lost database acknowledgement may still have committed the image reference.
+          this.logger.warn(`Could not confirm the product save for image ${filename}`);
+        }
       }
       throw error;
     }
@@ -108,7 +170,19 @@ export class ProductsService {
   async deleteProduct(body: Pick<ProductInput, 'id'>) {
     if (!isValidProductOrCartId(body?.id)) return { success: false };
     const deleted = await this.models.products.findByIdAndDelete(body.id);
+    if (deleted) await this.removeUploadedImage(deleted.image);
     return { success: Boolean(deleted) };
+  }
+
+  private async removeUploadedImage(image?: string | null) {
+    if (!image?.startsWith(uploadedImagePrefix)) return;
+    const filename = image.slice(uploadedImagePrefix.length);
+    if (!uploadedFilenamePattern.test(filename)) return;
+    try {
+      await this.images.deleteProductImage(filename);
+    } catch {
+      this.logger.error(`Could not delete unused product image ${filename}`);
+    }
   }
 
   async count() {

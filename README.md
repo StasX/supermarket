@@ -164,7 +164,7 @@ The frontend uses Angular 22, TypeScript 6, standalone components, reactive form
 
 For frontend development, keep the Compose application running on port 3000 (or run a separately configured local backend) and run `npm --prefix frontend start` in another terminal. Open `http://localhost:4200`; the Angular development server proxies API calls to NestJS. Change `frontend/proxy.conf.json` if the backend uses a different port. The Docker backend issues Secure cookies because it runs in production mode; for development over HTTP outside localhost, use a local backend without `NODE_ENV=production`, or configure HTTPS. Run `npm run build` from the root to build both projects without starting them.
 
-Bundled catalog photos live in `backend/static/products` and remain public at `/products/<filename>.png`. Administrator uploads (PNG, JPEG, or WebP, up to 5 MB) are saved in the private MinIO `product-images` bucket. `POST /api/products/images` returns `/products/uploads/<generated-filename>`; the backend streams these images without exposing MinIO credentials or requiring browser access to its API. The bucket is created automatically when `S3_CREATE_BUCKET=true`, as configured in `.env.example`. Image validation and administrator permissions are unchanged.
+Bundled catalog photos live in `backend/static/products` and remain public at `/products/<filename>.png`. Administrator uploads are saved in the private MinIO `product-images` bucket as part of a product save. The backend streams attached images at `/products/uploads/<generated-filename>`. The bucket is created automatically when `S3_CREATE_BUCKET=true`, as configured in `.env.example`. AWS deployments also need `s3:DeleteObject` permission for managed product images.
 
 Both Compose files build MinIO from the pinned upstream `RELEASE.2025-09-07T16-13-09Z` source using `minio/Dockerfile`, avoiding the unavailable prebuilt image repositories. The first build downloads Go dependencies and compiles the server, so it takes longer; later local builds reuse Docker layers. The MinIO image includes its health check and runs as UID/GID 1000. Existing MinIO data volumes must be writable by this user.
 
@@ -288,7 +288,6 @@ API paths are relative to the backend origin (`http://localhost:3000` by default
 | POST   | `/api/products/create`      | Create a product.         |
 | POST   | `/api/products/update`      | Edit a product.           |
 | POST   | `/api/products/delete`      | Delete a product (admin). |
-| POST   | `/api/products/images`      | Upload a product image.   |
 | POST   | `/api/products/search`      | Find products by name.    |
 | GET    | `/api/products`             | Get all products.         |
 | POST   | `/api/products/by-category` | Get products by category. |
@@ -322,7 +321,7 @@ For `/api/products/update`, include an additional `id` field containing the prod
 
 #### Upload a product image
 
-`POST /api/products/images` requires an administrator session. Send multipart form data with an `image` file (PNG, JPEG, or WebP, up to 5 MB). Success returns `{ "success": true, "image": "/products/uploads/<generated-filename>" }`. Use that URL as the product's `image` field.
+To attach a file, send the product fields and an `image` file (PNG, JPEG, or WebP, up to 5 MB) as multipart form data to `POST /api/products/create` or `POST /api/products/update`. Include `id` for updates. The saved upload URL appears in the catalog. A JSON update can keep the product's current upload by sending its existing URL or omitting the image field. Replacing an upload or deleting its product removes the old object. Bundled images and external URLs are supported as JSON image values.
 
 #### Find a product
 

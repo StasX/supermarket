@@ -16,22 +16,21 @@ test('administrator can upload a product image and retain it when editing', asyn
   await page.route('**/api/products', (route) =>
     route.fulfill({ json: { success: true, products: [product] } }),
   );
-  await page.route('**/api/products/images', async (route) => {
+  await page.route('**/api/products/create', async (route) => {
     uploadCount++;
     expect(route.request().headers()['content-type']).toContain('multipart/form-data');
-    expect(route.request().postDataBuffer()?.includes(Buffer.from('filename="edam.png"'))).toBe(
-      true,
-    );
-    await route.fulfill({ json: { success: true, image: '/products/new.png' } });
+    const body = route.request().postDataBuffer()?.toString();
+    expect(body).toContain('filename="edam.png"');
+    expect(body).toContain('New cheese');
+    product = { ...product, name: 'New cheese', image: '/products/uploads/new.png' };
+    await route.fulfill({ json: { success: true } });
   });
-  for (const endpoint of ['api/products/create', 'api/products/update']) {
-    await page.route(`**/${endpoint}`, async (route) => {
-      const body = route.request().postDataJSON();
-      expect(body.image).toBe('/products/new.png');
-      product = { ...product, ...body, price: Number(body.price) };
-      await route.fulfill({ json: { success: true } });
-    });
-  }
+  await page.route('**/api/products/update', async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.image).toBe('/products/uploads/new.png');
+    product = { ...product, ...body, price: Number(body.price) };
+    await route.fulfill({ json: { success: true } });
+  });
   await page.goto('/#/management');
   await page.getByLabel('Product name').fill('New cheese');
   await page.getByLabel('Price', { exact: true }).fill('5.25');

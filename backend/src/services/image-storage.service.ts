@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
@@ -64,6 +65,10 @@ export class ImageStorageService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException();
     }
     return this.getObject(filename);
+  }
+
+  async deleteProductImage(filename: string) {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: filename }));
   }
 
   async putInvoice(id: string, bytes: Buffer) {

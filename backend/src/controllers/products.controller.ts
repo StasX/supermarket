@@ -12,25 +12,24 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { randomUUID } from 'node:crypto';
 import { CsrfGuard } from '../guards/csrf.guard';
 import { Public, Role, SessionGuard } from '../guards/session.guard';
-import { ImageStorageService } from '../services/image-storage.service';
 import { ProductsService } from '../services/products.service';
 import { CategoryInput, ProductInput, SearchInput } from '../types/contracts';
+
+const ProductImageUpload = FileInterceptor('image', {
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+});
 
 @Controller()
 @UseGuards(SessionGuard, CsrfGuard)
 export class ProductsController {
-  constructor(
-    private readonly productsService: ProductsService,
-    private readonly images: ImageStorageService,
-  ) {}
+  constructor(private readonly productsService: ProductsService) {}
 
   @Public()
   @Get('products/uploads/:filename')
   async productImage(@Param('filename') filename: string) {
-    const stream = await this.images.get(filename);
+    const stream = await this.productsService.productImage(filename);
     const type = filename.endsWith('.png')
       ? 'image/png'
       : filename.endsWith('.jpg')
@@ -59,15 +58,17 @@ export class ProductsController {
   @Role(1)
   @Post('api/products/create')
   @HttpCode(200)
-  add(@Body() body: ProductInput) {
-    return this.productsService.saveProduct(body);
+  @UseInterceptors(ProductImageUpload)
+  add(@Body() body: ProductInput, @UploadedFile() file?: { buffer: Buffer }) {
+    return this.productsService.saveProduct(body, false, validateImage(file));
   }
 
   @Role(1)
   @Post('api/products/update')
   @HttpCode(200)
-  edit(@Body() body: ProductInput) {
-    return this.productsService.saveProduct(body, true);
+  @UseInterceptors(ProductImageUpload)
+  edit(@Body() body: ProductInput, @UploadedFile() file?: { buffer: Buffer }) {
+    return this.productsService.saveProduct(body, true, validateImage(file));
   }
 
   @Role(1)
@@ -77,33 +78,18 @@ export class ProductsController {
     return this.productsService.deleteProduct(body);
   }
 
-  @Role(1)
-  @Post('api/products/images')
-  @HttpCode(200)
-  @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
-  async uploadProductImage(@UploadedFile() file?: { buffer: Buffer }) {
-    const bytes = file?.buffer;
-    if (!bytes) {
-      throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
-    }
-    const extension = imageExtension(bytes);
-    if (!extension) {
-      throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
-    }
-    const filename = `${randomUUID()}.${extension}`;
-    await this.images.put(
-      filename,
-      bytes,
-      extension === 'jpg' ? 'image/jpeg' : `image/${extension}`,
-    );
-    return { success: true, image: `/products/uploads/${filename}` };
-  }
-
   @Role(0)
   @Get('api/products/count')
   productsCount() {
     return this.productsService.count();
   }
+}
+
+function validateImage(file?: { buffer: Buffer }) {
+  if (!file) return undefined;
+  const extension = imageExtension(file.buffer);
+  if (!extension) throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
+  return { bytes: file.buffer, extension };
 }
 
 /** Identify the supported image formats from their file signatures. */

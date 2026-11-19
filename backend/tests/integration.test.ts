@@ -534,35 +534,64 @@ test('invoice PDFs persist in MinIO, preserve the order snapshot, and enforce ow
   assert.equal(publicAttempt.status, 404);
 });
 
-test('administrator uploads persist in MinIO and are publicly served by the app', async () => {
+test('product images are stored, served, replaced and deleted with their product', async () => {
   const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
-  const form = new FormData();
-  form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
-  const upload = await fetch(base + '/api/products/images', {
-    method: 'POST',
-    headers: await csrfHeaders(adminCookie),
-    body: form,
-    signal: AbortSignal.timeout(5000),
-  });
-  assert.equal(upload.status, 200);
-  const result = await upload.json();
-  assert.match(result.image, /^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  const product = { name: 'Uploaded image product', category: 'Milk & Eggs', price: '5.00' };
+  const save = async (id?: string) => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(product)) form.append(key, value);
+    if (id) form.append('id', id);
+    form.append('image', new Blob([bytes], { type: 'image/png' }), 'test.png');
+    const response = await fetch(base + (id ? '/api/products/update' : '/api/products/create'), {
+      method: 'POST',
+      headers: await csrfHeaders(adminCookie),
+      body: form,
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).success, true);
+    return Product.findOne({ name: product.name }).orFail();
+  };
+  const created = await save();
+  assert.match(created.image, /^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  const originalImage = await fetch(base + created.image, { signal: AbortSignal.timeout(5000) });
+  assert.equal(originalImage.status, 200);
+  assert.equal(originalImage.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await originalImage.arrayBuffer()), bytes);
   const client = createStorageClient();
-  try {
-    const object = await client.send(
+  const head = (url: string) =>
+    client.send(
       new HeadObjectCommand({
         Bucket: process.env['S3_BUCKET'] || 'product-images',
-        Key: result.image.split('/').pop(),
+        Key: url.split('/').pop(),
       }),
     );
-    assert.equal(object.ContentLength, bytes.length);
+  try {
+    assert.equal((await head(created.image)).ContentLength, bytes.length);
+    const updated = await save(String(created._id));
+    assert.notEqual(updated.image, created.image);
+    const missing = (error: any) => error.$metadata?.httpStatusCode === 404;
+    await assert.rejects(head(created.image), missing);
+    assert.equal((await head(updated.image)).ContentLength, bytes.length);
+    assert.equal(
+      (await fetch(base + created.image, { signal: AbortSignal.timeout(5000) })).status,
+      404,
+    );
+
+    const deleted = await request('/api/products/delete', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: { id: String(created._id) },
+    });
+    assert.equal(deleted.body.success, true);
+    await assert.rejects(head(updated.image), missing);
+    assert.equal(
+      (await fetch(base + updated.image, { signal: AbortSignal.timeout(5000) })).status,
+      404,
+    );
   } finally {
     client.destroy();
   }
-  const image = await fetch(base + result.image, { signal: AbortSignal.timeout(5000) });
-  assert.equal(image.status, 200);
-  assert.equal(image.headers.get('content-type'), 'image/png');
-  assert.deepEqual(Buffer.from(await image.arrayBuffer()), bytes);
 });
 
 test('logout expires the browser session cookie and rejects the revoked session', async () => {

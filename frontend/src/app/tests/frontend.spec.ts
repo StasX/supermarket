@@ -158,14 +158,17 @@ describe('API compatibility', () => {
       document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/';
     }
   });
-  it('uploads an image as multipart form data', async () => {
+  it('saves the product and image in one multipart request', async () => {
     const file = new File(['image'], 'cheese.png', { type: 'image/png' });
-    const promise = TestBed.inject(ApiService).uploadProductImage(file);
-    const request = TestBed.inject(HttpTestingController).expectOne('/api/products/images');
+    const promise = TestBed.inject(ApiService).saveProduct(product, file);
+    const request = TestBed.inject(HttpTestingController).expectOne('/api/products/update');
     expect(request.request.body.get('image')).toBe(file);
+    expect(request.request.body.get('name')).toBe(product.name);
+    expect(request.request.body.get('id')).toBe(product.id);
+    expect(request.request.body.get('price')).toBe('10.50');
     expect(request.request.headers.has('Content-Type')).toBe(false);
-    request.flush({ success: true, image: '/products/test.png' });
-    expect((await promise).image).toBe('/products/test.png');
+    request.flush({ success: true });
+    expect(await promise).toEqual({ success: true });
   });
   it('returns the catalog product shape for category results', async () => {
     const promise = TestBed.inject(ApiService).products('Wine & Drinks');

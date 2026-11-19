@@ -684,6 +684,11 @@ test('S3 storage signs path-style requests, preserves image bytes, and maps miss
     expect(upload.url).toContain('/test-images/abc.png');
     expect(upload.authorization).toContain('AWS4-HMAC-SHA256 Credential=test-access/');
     expect(upload.body).toEqual(bytes);
+    await storage.deleteProductImage('abc.png');
+    expect(received.at(-1)).toMatchObject({
+      method: 'DELETE',
+      url: '/test-images/abc.png?x-id=DeleteObject',
+    });
   } finally {
     storage?.onModuleDestroy();
     await new Promise<void>((resolve, reject) =>
@@ -739,6 +744,9 @@ beforeAll(async () => {
       },
       put: async (filename: string, bytes: Buffer) => {
         images.set(filename, bytes);
+      },
+      deleteProductImage: async (filename: string) => {
+        images.delete(filename);
       },
       get: async (filename: string) => {
         const bytes = images.get(filename);
@@ -889,7 +897,7 @@ test('missing product images return 404', async () => {
 });
 
 test.each([null, customer])('image uploads require an administrator (%s)', async (user) => {
-  const call = api().post('/api/products/images');
+  const call = api().post('/api/products/create');
   if (user) call.set('Cookie', cookie(user));
   const result = await call
     .attach('image', Buffer.from('not an image'), 'image.png')
@@ -897,30 +905,40 @@ test.each([null, customer])('image uploads require an administrator (%s)', async
   expect(result.body).toEqual({ success: false });
 });
 
-test('uploads detect image format from content and serve the saved file', async () => {
-  const source = path.join(__dirname, '..', 'static', 'products', 'edam.png');
+const imageProduct = { name: 'Sample cheese', category: 'Milk & Eggs', price: '5.25' };
+const productImageFile = path.join(__dirname, '..', 'static', 'products', 'edam.png');
+
+test('a product save detects the file format and only serves owned uploads', async () => {
   const response = await api()
-    .post('/api/products/images')
+    .post('/api/products/create')
     .set('Cookie', cookie(admin))
-    .attach('image', source, { filename: '../../untrusted.jpg', contentType: 'image/jpeg' })
+    .field(imageProduct)
+    .attach('image', productImageFile, {
+      filename: '../../untrusted.jpg',
+      contentType: 'image/jpeg',
+    })
     .expect(200);
-  expect(response.body.image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  expect(response.body.success).toBe(true);
+  const { image } = models.products.create.mock.calls[0][0];
+  expect(image).toMatch(/^\/products\/uploads\/[a-f0-9-]+\.png$/);
+  await api().get(image).expect(404);
+  models.products.exists.mockResolvedValueOnce({ _id: customer._id });
   const served = await api()
-    .get(response.body.image)
+    .get(image)
     .expect(200)
     .expect('Content-Type', /image\/png/);
-  expect(served.body.equals(fs.readFileSync(source))).toBe(true);
+  expect(served.body.equals(fs.readFileSync(productImageFile))).toBe(true);
 });
 
 test('missing uploaded images return 404', async () => {
   await api().get('/products/uploads/00000000-0000-0000-0000-000000000000.png').expect(404);
 });
 
-test('uploads reject missing files and disguised non-images', async () => {
-  await api().post('/api/products/images').set('Cookie', cookie(admin)).expect(400);
+test('product saves reject disguised non-images', async () => {
   await api()
-    .post('/api/products/images')
+    .post('/api/products/create')
     .set('Cookie', cookie(admin))
+    .field(imageProduct)
     .attach('image', Buffer.from('<svg onload="alert(1)"></svg>'), {
       filename: 'image.png',
       contentType: 'image/png',
@@ -930,10 +948,82 @@ test('uploads reject missing files and disguised non-images', async () => {
 
 test('uploads reject files larger than 5 MB', async () => {
   await api()
-    .post('/api/products/images')
+    .post('/api/products/create')
     .set('Cookie', cookie(admin))
+    .field(imageProduct)
     .attach('image', Buffer.alloc(5 * 1024 * 1024 + 1), 'large.png')
     .expect(413);
+});
+
+test('rejecting a duplicate product discards its uploaded image', async () => {
+  const { MongoServerError } = require('mongoose').mongo;
+  models.products.create.mockRejectedValueOnce(new MongoServerError({ code: 11000 }));
+  const response = await api()
+    .post('/api/products/create')
+    .set('Cookie', cookie(admin))
+    .field(imageProduct)
+    .attach('image', productImageFile)
+    .expect(200);
+  expect(response.body).toEqual({ success: false });
+  expect(images.size).toBe(0);
+});
+
+test('editing a missing product discards the replacement image', async () => {
+  models.products.findByIdAndUpdate.mockResolvedValueOnce(null);
+  const response = await api()
+    .post('/api/products/update')
+    .set('Cookie', cookie(admin))
+    .field({ ...imageProduct, id: customer._id })
+    .attach('image', productImageFile)
+    .expect(200);
+  expect(response.body).toEqual({ success: false });
+  expect(images.size).toBe(0);
+});
+
+test('replacing and deleting a product remove the respective managed images', async () => {
+  const filename = '00000000-0000-0000-0000-000000000001.png';
+  const image = `/products/uploads/${filename}`;
+  images.set(filename, Buffer.from('old image'));
+  models.products.findByIdAndUpdate.mockResolvedValueOnce({ image });
+  const response = await api()
+    .post('/api/products/update')
+    .set('Cookie', cookie(admin))
+    .field({ ...imageProduct, id: customer._id })
+    .attach('image', productImageFile)
+    .expect(200);
+  expect(response.body).toEqual({ success: true });
+  const replacement = models.products.findByIdAndUpdate.mock.calls[0][1].$set.image as string;
+  expect(images.has(filename)).toBe(false);
+  expect(images.has(replacement.split('/').pop()!)).toBe(true);
+  models.products.findByIdAndDelete.mockResolvedValueOnce({ image: replacement });
+  await api()
+    .post('/api/products/delete')
+    .set('Cookie', cookie(admin))
+    .send({ id: customer._id })
+    .expect(200);
+  expect(images.size).toBe(0);
+});
+
+test('an existing upload can only be retained by the product that owns it', async () => {
+  const image = '/products/uploads/00000000-0000-0000-0000-000000000001.png';
+  const create = await api()
+    .post('/api/products/create')
+    .set('Cookie', cookie(admin))
+    .send({ ...imageProduct, image })
+    .expect(200);
+  expect(create.body).toEqual({ success: false });
+  expect(models.products.create).not.toHaveBeenCalled();
+  models.products.findOneAndUpdate.mockResolvedValueOnce({ image });
+  const edit = () =>
+    api()
+      .post('/api/products/update')
+      .set('Cookie', cookie(admin))
+      .send({ ...imageProduct, id: customer._id, image })
+      .expect(200);
+  expect((await edit()).body).toEqual({ success: true });
+  expect((await edit()).body).toEqual({ success: false });
+  expect(models.products.findOneAndUpdate.mock.calls[0][0]).toEqual({ _id: customer._id, image });
+  expect(models.products.findByIdAndUpdate).not.toHaveBeenCalled();
 });
 
 test.each([
