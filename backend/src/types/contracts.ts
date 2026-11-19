@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Types } from 'mongoose';
-// Request fields are untrusted until validated by the services.
+// Request fields are untrusted until they pass validation.
 export type Input<K extends string> = Partial<Record<K, unknown>>;
 export type LoginInput = Input<'username' | 'password'>;
 export type SignupInput = Input<

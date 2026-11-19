@@ -1,9 +1,15 @@
-import { CategoryInput, SearchInput, ProductInput, record } from '../types/contracts';
+import { CartItem, CategoryInput, SearchInput, ProductInput } from '../types/contracts';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
-import { productCategories } from '../config/product-categories';
+import { validateCartItems } from '../validators/cart.validator';
+import { isObjectId } from '../validators/object-id';
+import {
+  isProductCategory,
+  validateProduct,
+  validateProductSearch,
+} from '../validators/product.validator';
 import { ImageStorageService } from './image-storage.service';
 
 const uploadedImagePrefix = '/products/uploads/';
@@ -13,23 +19,6 @@ const uploadedFilenamePattern =
 interface ProductImageUpload {
   bytes: Buffer;
   extension: 'png' | 'jpg' | 'webp';
-}
-
-const isValidProductOrCartId = (id: unknown): id is string =>
-  typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
-
-function isValidPrice(value: unknown): boolean {
-  if (typeof value !== 'string' && typeof value !== 'number') return false;
-  const text = String(value);
-  const decimal = text.length - 3;
-  if (decimal < 1 || text[decimal] !== '.') return false;
-  for (let index = 0; index < text.length; index++) {
-    if (index === decimal) continue;
-    const digit = text.charCodeAt(index);
-    if (digit < 48 || digit > 57) return false;
-  }
-  // Prices must remain representable as safe integer cents at checkout.
-  return Number.isSafeInteger(Math.round(Number(text) * 100));
 }
 
 interface ProductRecord {
@@ -72,18 +61,19 @@ export class ProductsService {
   }
 
   async category(body: CategoryInput) {
-    if (typeof body.category !== 'string' || !productCategories.includes(body.category)) {
+    const category = body?.category;
+    if (!isProductCategory(category)) {
       return { success: false };
     }
     return {
       success: true,
-      products: (await this.models.products.find({ category: body.category })).map(productResponse),
+      products: (await this.models.products.find({ category })).map(productResponse),
     };
   }
 
   async find(body: SearchInput) {
-    const name = body.product ?? body.name;
-    if (typeof name !== 'string' || !name.length) {
+    const name = validateProductSearch(body);
+    if (!name) {
       return { success: false };
     }
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -96,20 +86,13 @@ export class ProductsService {
   }
 
   async saveProduct(body: ProductInput, edit = false, upload?: ProductImageUpload) {
-    if (
-      typeof body?.name !== 'string' ||
-      !body.name.length ||
-      typeof body.category !== 'string' ||
-      !productCategories.includes(body.category) ||
-      !isValidPrice(body.price) ||
-      (edit && !isValidProductOrCartId(body.id))
-    ) {
-      return { success: false };
-    }
-    const image = typeof body.image === 'string' ? body.image : undefined;
+    const input = validateProduct(body, edit);
+    if (!input) return { success: false };
+
+    const { id, name, category, price, image } = input;
     const retainUpload = !upload && image?.startsWith(uploadedImagePrefix);
     // A managed image can only stay on its existing product. Its key is never reused.
-    if (retainUpload && !edit) return { success: false };
+    if (retainUpload && !id) return { success: false };
 
     const filename = upload ? `${randomUUID()}.${upload.extension}` : undefined;
     if (upload && filename) {
@@ -124,21 +107,21 @@ export class ProductsService {
 
     const nextImage = filename ? uploadedImagePrefix + filename : image;
     const product = {
-      name: body.name,
-      category: body.category,
-      price: Number(body.price),
+      name,
+      category,
+      price,
       ...(nextImage !== undefined ? { image: nextImage } : {}),
     };
     try {
-      if (edit) {
+      if (id) {
         const previous = retainUpload
           ? await this.models.products.findOneAndUpdate(
-              { _id: body.id, image },
+              { _id: id, image },
               { $set: product },
               { returnDocument: 'before', runValidators: true },
             )
           : await this.models.products.findByIdAndUpdate(
-              body.id,
+              id,
               { $set: product },
               { returnDocument: 'before', runValidators: true },
             );
@@ -168,7 +151,7 @@ export class ProductsService {
   }
 
   async deleteProduct(body: Pick<ProductInput, 'id'>) {
-    if (!isValidProductOrCartId(body?.id)) return { success: false };
+    if (!isObjectId(body?.id)) return { success: false };
     const deleted = await this.models.products.findByIdAndDelete(body.id);
     if (deleted) await this.removeUploadedImage(deleted.image);
     return { success: Boolean(deleted) };
@@ -190,50 +173,29 @@ export class ProductsService {
   }
 
   async resolveCartProducts(input: unknown, includeNames = false) {
-    if (!Array.isArray(input)) {
-      return null;
-    }
-    const ids = new Set<string>();
-    for (const value of input as unknown[]) {
-      const item = record(value);
-      if (
-        !item ||
-        !isValidProductOrCartId(item['id']) ||
-        typeof item['count'] !== 'number' ||
-        !Number.isSafeInteger(item['count']) ||
-        item['count'] < 1
-      ) {
-        return null;
-      }
-      const id = item['id'].toLowerCase();
-      if (ids.has(id)) {
-        return null;
-      }
-      ids.add(id);
-    }
-    if (!input.length) {
-      return [];
-    }
-    const catalog: ProductRecord[] = await this.models.products.find({ _id: { $in: [...ids] } });
+    const items = validateCartItems(input);
+    if (!items) return null;
+    if (!items.length) return [];
+
+    const catalog: ProductRecord[] = await this.models.products.find({
+      _id: { $in: items.map(({ id }) => id) },
+    });
     const productsById = new Map(catalog.map((product) => [String(product._id), product]));
-    const products: { id: string; count: number; price: number; name?: string }[] = [];
-    for (const value of input as unknown[]) {
-      const item = record(value);
-      if (!isValidProductOrCartId(item['id']) || typeof item['count'] !== 'number') return null;
-      const id = item['id'].toLowerCase();
+    const products: CartItem[] = [];
+    for (const { id, count } of items) {
       const product = productsById.get(id);
       const price = product?.price;
       if (
         typeof price !== 'number' ||
         !Number.isFinite(price) ||
         price < 0 ||
-        !Number.isFinite(price * item['count'])
+        !Number.isFinite(price * count)
       ) {
         return null;
       }
       products.push({
         id,
-        count: item['count'],
+        count,
         price,
         ...(includeNames ? { name: product?.name || 'Unavailable product' } : {}),
       });

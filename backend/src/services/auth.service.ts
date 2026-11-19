@@ -7,6 +7,11 @@ import { compare, hash } from 'bcryptjs';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { CsrfService } from './csrf.service';
 import mongoose from 'mongoose';
+import {
+  validateLogin,
+  validateSignup,
+  validateSignupAvailability,
+} from '../validators/auth.validator';
 // Keep the untyped CommonJS dependency behind the operations used here.
 const jwt = require('jsonwebtoken') as {
   verify(token: string, key: Buffer, options: { algorithms: string[] }): unknown;
@@ -88,11 +93,12 @@ export class AuthService {
   }
 
   async login(body: LoginInput, response: CookieResponse) {
-    if (!email(body.username) || typeof body.password !== 'string' || body.password.length < 8) {
+    const credentials = validateLogin(body);
+    if (!credentials) {
       throw new HttpException({ success: false }, 401);
     }
-    const user = await this.models.users.findOne({ username: body.username });
-    if (!user || !(await compare(body.password, user.password))) {
+    const user = await this.models.users.findOne({ username: credentials.username });
+    if (!user || !(await compare(credentials.password, user.password))) {
       throw new HttpException({ success: false }, 401);
     }
     const previous = await this.models.users.findOneAndUpdate(
@@ -132,7 +138,8 @@ export class AuthService {
   }
 
   async checkSignup(body: Pick<SignupInput, 'email' | 'id'>) {
-    if (!email(body.email) || typeof body.id !== 'string' || !/^\d{9}$/.test(body.id)) {
+    const request = validateSignupAvailability(body);
+    if (!request) {
       return {
         success: false,
         available: false,
@@ -140,8 +147,8 @@ export class AuthService {
       };
     }
     const [existingEmail, existingId] = await Promise.all([
-      this.models.users.findOne({ username: body.email }),
-      this.models.users.findOne({ id: Number(body.id) }),
+      this.models.users.findOne({ username: request.email }),
+      this.models.users.findOne({ id: Number(request.id) }),
     ]);
     const emailExists = Boolean(existingEmail);
     const idExists = Boolean(existingId);
@@ -162,35 +169,20 @@ export class AuthService {
   }
 
   async signup(body: SignupInput) {
-    const name =
-      /^(?=.{1,150}$)\p{L}[\p{L}\p{M}]*(?:[ '\u2019\u02bc\-\u2010\u2011][\p{L}\p{M}]+)*$/u;
-    const street =
-      /^(?=.{1,150}$)(?=.*[\p{L}\p{N}])[\p{L}\p{M}\p{N} '\u2019\u02bc\-\u2010\u2011.,/#]+$/u;
-    if (
-      typeof body.firstName !== 'string' ||
-      typeof body.lastName !== 'string' ||
-      typeof body.city !== 'string' ||
-      ![body.firstName, body.lastName, body.city].every(
-        (value) => typeof value === 'string' && name.test(value),
-      ) ||
-      typeof body.street !== 'string' ||
-      !street.test(body.street) ||
-      !email(body.email) ||
-      typeof body.pass !== 'string' ||
-      body.pass.length < 8 ||
-      !/^\d{9}$/.test(String(body.id))
-    ) {
+    const signup = validateSignup(body);
+    if (!signup) {
       return { success: false, reason: 'one of passed values invalid' };
     }
-    const availability = await this.checkSignup({ email: body.email, id: String(body.id) });
+    const { id, email, firstName, lastName, city, street, pass } = signup;
+    const availability = await this.checkSignup({ email, id });
     if (!availability.available) return { success: false, reason: availability.reason };
     try {
       await this.models.users.create({
-        id: Number(body.id),
-        name: { first_name: body.firstName, last_name: body.lastName },
-        username: body.email,
-        password: await hash(body.pass, 12),
-        address: { city: body.city, street: body.street },
+        id: Number(id),
+        name: { first_name: firstName, last_name: lastName },
+        username: email,
+        password: await hash(pass, 12),
+        address: { city, street },
         role: 0,
         has_logged_in: false,
       });
@@ -205,15 +197,4 @@ export class AuthService {
       return { success: false, reason: 'unexpected error' };
     }
   }
-}
-
-function email(value: unknown): value is string {
-  if (typeof value !== 'string' || /\s/.test(value)) return false;
-
-  const at = value.indexOf('@');
-  if (at < 1 || value.indexOf('@', at + 1) !== -1) return false;
-
-  // The domain needs a dot with at least one character on either side.
-  const dot = value.indexOf('.', at + 2);
-  return dot !== -1 && dot < value.length - 1;
 }

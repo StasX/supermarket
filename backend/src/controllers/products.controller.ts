@@ -16,6 +16,7 @@ import { CsrfGuard } from '../guards/csrf.guard';
 import { Public, Role, SessionGuard } from '../guards/session.guard';
 import { ProductsService } from '../services/products.service';
 import { CategoryInput, ProductInput, SearchInput } from '../types/contracts';
+import { productImageExtension } from '../validators/product.validator';
 
 const ProductImageUpload = FileInterceptor('image', {
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
@@ -87,21 +88,7 @@ export class ProductsController {
 
 function validateImage(file?: { buffer: Buffer }) {
   if (!file) return undefined;
-  const extension = imageExtension(file.buffer);
+  const extension = productImageExtension(file.buffer);
   if (!extension) throw new BadRequestException('Choose a PNG, JPEG, or WebP image.');
   return { bytes: file.buffer, extension };
-}
-
-/** Identify the supported image formats from their file signatures. */
-function imageExtension(bytes: Buffer): 'png' | 'jpg' | 'webp' | null {
-  const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  if (bytes.subarray(0, 8).equals(pngSignature)) {
-    return 'png';
-  }
-  if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
-    return 'jpg';
-  }
-  const isWebp =
-    bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
-  return isWebp ? 'webp' : null;
 }

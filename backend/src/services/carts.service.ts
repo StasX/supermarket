@@ -3,9 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
 import { ProductsService } from './products.service';
-
-const isValidProductOrCartId = (id: unknown): id is string =>
-  typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
+import { isObjectId } from '../validators/object-id';
 
 function cartResponse(cart: Pick<CartRecord, 'products' | 'created_at'> & { _id: unknown }) {
   return { id: cart._id, products: cart.products, createdAt: cart.created_at };
@@ -42,7 +40,7 @@ export class CartsService {
   }
 
   async updateCart(user: Pick<UserRecord, 'id' | 'username'>, body: CartInput) {
-    if (!isValidProductOrCartId(body?.id)) {
+    if (!isObjectId(body?.id)) {
       return { success: false };
     }
     const products = await this.products.resolveCartProducts(body.products);
