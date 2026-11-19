@@ -698,6 +698,7 @@ describe('demo checkout', () => {
     const request = TestBed.inject(HttpTestingController).expectOne('/api/orders/checkout');
     expect(request.request.body).toEqual({
       cartId: 'c1',
+      reviewedItems: [{ id: 'p1', count: 2, unitPriceCents: 1050 }],
       shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
       payment: { method: 'credit_card', last4: '4242' },
     });
@@ -767,6 +768,33 @@ describe('demo checkout', () => {
     expect(page.cart.id()).toBe('c1');
     expect(page.error()).toBe('Cart changed');
     expect(page.completed()).toBeNull();
+  });
+  it('shows an updated price and submits it only after the customer orders again', async () => {
+    const fixture = TestBed.createComponent(CheckoutPage);
+    const page = setup(fixture);
+    vi.spyOn(page.cart, 'load').mockResolvedValue();
+    const http = TestBed.inject(HttpTestingController);
+    const pending = page.submit();
+    http.expectOne('/api/orders/checkout').flush({
+      success: false,
+      reason: 'Review updated prices.',
+      review: { products: [{ id: 'p1', name: 'Juice', count: 2, price: 12 }] },
+    });
+    await pending;
+    expect(page.completed()).toBeNull();
+    expect(page.form.controls.city.value).toBe('Tel Aviv');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('$12.00 each');
+    expect(fixture.nativeElement.textContent).toContain('Total: $24.00');
+    http.expectNone('/api/orders/checkout');
+
+    const retry = page.submit();
+    const updated = http.expectOne('/api/orders/checkout');
+    expect(updated.request.body.reviewedItems).toEqual([
+      { id: 'p1', count: 2, unitPriceCents: 1200 },
+    ]);
+    updated.flush({ success: false, reason: 'Test response' });
+    await retry;
   });
 });
 

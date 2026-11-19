@@ -10,7 +10,7 @@ export type CategoryInput = Input<'category'>;
 export type SearchInput = Input<'product' | 'name'>;
 export type ProductInput = Input<'id' | 'name' | 'category' | 'price' | 'image'>;
 export type CartInput = Input<'id' | 'products'>;
-export type CheckoutInput = Input<'cartId' | 'shipping' | 'payment'>;
+export type CheckoutInput = Input<'cartId' | 'reviewedItems' | 'shipping' | 'payment'>;
 export function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)

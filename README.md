@@ -526,12 +526,13 @@ Checkout at `/#/order/payment` requires a nonempty customer cart. Enter city, st
 ```json
 {
   "cartId": "<cart-object-id>",
+  "reviewedItems": [{ "id": "<product-object-id>", "count": 1, "unitPriceCents": 1050 }],
   "shipping": { "city": "Tel Aviv", "street": "Ha Masger 10", "date": "2099-12-01" },
   "payment": { "method": "credit_card", "last4": "4242" }
 }
 ```
 
-Shipping dates are checked against the shop date in `Asia/Jerusalem`. The backend validates cart ownership and recalculates prices from the catalog, ignoring client totals. Success returns `{ "success": true, "order": { "id": "...", "total": 10.50, "createdAt": "...", "products": [{ "id": "...", "name": "...", "count": 1, "price": 10.50 }], "invoiceUrl": "/orders/<order-id>/invoice", "shipping": { "city": "...", "street": "...", "date": "..." }, "payment": { "mode": "demo", "method": "credit_card", "last4": "4242" } } }`. Validation failures return `{ "success": false, "reason": "..." }`.
+Shipping dates are checked against the shop date in `Asia/Jerusalem`. The backend checks the reviewed product IDs, quantities, and unit prices against the current cart and catalog, then calculates the total server-side. If they differ, it leaves the cart open and returns `{ "success": false, "reason": "...", "review": { "products": [...] } }` so the customer can review the updated items and submit again. A confirmed order uses the prices that matched the customer's review. Success returns `{ "success": true, "order": { "id": "...", "total": 10.50, "createdAt": "...", "products": [{ "id": "...", "name": "...", "count": 1, "price": 10.50 }], "invoiceUrl": "/orders/<order-id>/invoice", "shipping": { "city": "...", "street": "...", "date": "..." }, "payment": { "mode": "demo", "method": "credit_card", "last4": "4242" } } }`. Other validation failures return `{ "success": false, "reason": "..." }`.
 
 Checkout closes the cart and saves an immutable order snapshot in one atomic cart update. An order is then inserted with a unique partial index for demo orders by cart ID. Concurrent requests and retries reuse this snapshot and return the same order, including recovery after an interrupted order insert; an intervening cart edit prevents stale checkout. Only demo payment metadata is stored. Existing order records are retained. Real payments require a provider integration before this feature can charge cards.
 

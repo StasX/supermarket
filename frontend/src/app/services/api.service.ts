@@ -110,10 +110,9 @@ export class ApiService {
 
   checkout(body: CheckoutRequest) {
     return firstValueFrom(
-      this.http.post<Result & { reason?: string; order?: CheckoutOrder }>(
-        '/api/orders/checkout',
-        body,
-      ),
+      this.http.post<
+        Result & { reason?: string; order?: CheckoutOrder; review?: { products: CartItem[] } }
+      >('/api/orders/checkout', body),
     );
   }
 

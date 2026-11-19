@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { CurrencyPipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -31,6 +31,18 @@ export class CheckoutPage implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly auth = inject(AuthService);
   readonly cart = inject(CartService);
+  readonly reviewedLines = computed(() =>
+    this.cart.lines().map(({ id, name, count, price }) => ({
+      id,
+      name,
+      count,
+      unitPriceCents: Math.round(price * 100),
+    })),
+  );
+  readonly reviewedTotal = computed(
+    () =>
+      this.reviewedLines().reduce((sum, item) => sum + item.count * item.unitPriceCents, 0) / 100,
+  );
   readonly today = localDate();
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -92,10 +104,18 @@ export class CheckoutPage implements OnInit {
       const { city, street, date, number } = this.form.getRawValue();
       const result = await this.api.checkout({
         cartId,
+        reviewedItems: this.reviewedLines().map(({ id, count, unitPriceCents }) => ({
+          id,
+          count,
+          unitPriceCents,
+        })),
         shipping: { city: city.trim(), street: street.trim(), date },
         payment: { method: 'credit_card', last4: number.replace(/ /g, '').slice(-4) },
       });
       if (!result.success || !result.order) {
+        if (result.review && this.cart.id() === cartId) {
+          this.cart.items.set(result.review.products);
+        }
         throw new Error(result.reason || 'Order could not be placed. Please try again.');
       }
       const order = result.order;

@@ -139,6 +139,7 @@ const api = () => {
 };
 const checkoutBody = {
   cartId: customer._id,
+  reviewedItems: [{ id: admin._id, count: 2, unitPriceCents: 525 }],
   shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
   payment: { method: 'credit_card', last4: '4242' },
 };
@@ -383,10 +384,46 @@ test('checkout rejects another customer cart or an empty cart', async () => {
   expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
 });
 
+test('checkout requires a new review when line prices change even if the total matches', async () => {
+  const products = [
+    { id: admin._id, count: 1, price: 5.25 },
+    { id: customer._id, count: 1, price: 4.75 },
+  ];
+  models.carts.findOne.mockResolvedValue({ _id: customer._id, status: 1, products });
+  models.products.find.mockResolvedValue([
+    { _id: admin._id, price: 6.25 },
+    { _id: customer._id, price: 3.75 },
+  ]);
+  const response = await api()
+    .post('/api/orders/checkout')
+    .set('Cookie', cookie())
+    .send({
+      ...checkoutBody,
+      reviewedItems: products.map(({ id, count, price }) => ({
+        id,
+        count,
+        unitPriceCents: price * 100,
+      })),
+    })
+    .expect(200);
+  expect(response.body).toMatchObject({
+    success: false,
+    review: {
+      products: [
+        { id: admin._id, price: 6.25 },
+        { id: customer._id, price: 3.75 },
+      ],
+    },
+  });
+  expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(models.orders.findOneAndUpdate).not.toHaveBeenCalled();
+});
+
 test('checkout retries a closed cart using its original snapshot', async () => {
   const snapshot = {
     cart_id: customer._id,
     price: 12,
+    products: [{ id: admin._id, count: 2, price: 6 }],
     shipping: checkoutBody.shipping,
     payment: { mode: 'demo', method: 'credit_card', last4: '4242' },
   };
@@ -395,10 +432,16 @@ test('checkout retries a closed cart using its original snapshot', async () => {
   const response = await api()
     .post('/api/orders/checkout')
     .set('Cookie', cookie())
-    .send(checkoutBody);
+    .send({ ...checkoutBody, reviewedItems: [{ id: admin._id, count: 2, unitPriceCents: 600 }] });
   expect(response.body).toMatchObject({ success: true, order: { id: 'order1', total: 12 } });
   expect(models.carts.findOneAndUpdate).not.toHaveBeenCalled();
   expect(models.orders.findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: snapshot });
+  const differentReview = await api()
+    .post('/api/orders/checkout')
+    .set('Cookie', cookie())
+    .send(checkoutBody);
+  expect(differentReview.body.success).toBe(false);
+  expect(models.orders.findOneAndUpdate).toHaveBeenCalledTimes(1);
 });
 
 test.each(['after cart closure', 'before order insert', 'after order insert'])(
@@ -575,7 +618,7 @@ test('invoice storage failures can be retried independently of checkout', async 
   const checkout = await api()
     .post('/api/orders/checkout')
     .set('Cookie', cookie())
-    .send(checkoutBody)
+    .send({ ...checkoutBody, reviewedItems: [{ id: admin._id, count: 2, unitPriceCents: 600 }] })
     .expect(200);
   expect(invoiceWrite).not.toHaveBeenCalled();
   const url = checkout.body.order.invoiceUrl;

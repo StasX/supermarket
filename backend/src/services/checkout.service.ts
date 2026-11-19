@@ -1,4 +1,4 @@
-import { CheckoutInput, OrderSnapshot, UserRecord, record } from '../types/contracts';
+import { CartItem, CheckoutInput, OrderSnapshot, UserRecord, record } from '../types/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import mongoose from 'mongoose';
 import { MODELS, DatabaseModels } from '../modules/database.module';
@@ -6,6 +6,21 @@ import { ProductsService } from './products.service';
 
 const isValidProductOrCartId = (id: unknown): id is string =>
   typeof id === 'string' && mongoose.isObjectIdOrHexString(id);
+
+function matchesReviewedItems(reviewed: unknown, products: CartItem[]): boolean {
+  if (!Array.isArray(reviewed) || reviewed.length !== products.length) return false;
+
+  const byId = new Map<unknown, Record<string, unknown>>();
+  for (const value of reviewed as unknown[]) {
+    const item = record(value);
+    byId.set(item['id'], item);
+  }
+
+  return products.every(({ id, count, price }) => {
+    const item = byId.get(id);
+    return item?.['count'] === count && item['unitPriceCents'] === Math.round(price * 100);
+  });
+}
 
 function orderResponse(order: OrderSnapshot & { _id: unknown }) {
   return {
@@ -107,6 +122,12 @@ export class CheckoutService {
       if (!Number.isSafeInteger(totalCents)) {
         return fail('The order total is too large.');
       }
+      if (!matchesReviewedItems(body.reviewedItems, products)) {
+        return {
+          ...fail('Your cart items or prices changed. Review the updated order before placing it.'),
+          review: { products },
+        };
+      }
       const snapshot = {
         user_id: user.id,
         username: user.username,
@@ -128,6 +149,9 @@ export class CheckoutService {
     }
     if (cart?.status !== 0 || !cart.checkout) {
       return fail('Your cart changed. Review it and try again.');
+    }
+    if (!matchesReviewedItems(body.reviewedItems, cart.checkout.products)) {
+      return fail('This cart was already checked out with different items or prices.');
     }
     const query = { cart_id: cartId, 'payment.mode': 'demo' };
     let order;

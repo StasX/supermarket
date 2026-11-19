@@ -399,13 +399,16 @@ test('concurrent cart creation allows one open cart while preserving closed cart
 test('checkout saves shipping and demo payment once, closes the cart, and survives retries', async () => {
   const cart = await Cart.findOne({ user_id: Number(registration.id), status: 1 });
   const product = await Product.findOne({});
-  // Simulate a stale price already stored in MongoDB outside the validated model writes.
-  await Cart.collection.updateOne(
+  // The cart still has the unit price the customer saw before the catalog changed.
+  const reviewedItems = [{ id: String(product._id), count: 2, unitPriceCents: 425 }];
+  await Cart.updateOne(
     { _id: cart._id },
-    { $set: { products: [{ id: String(product._id), count: 2, price: -1 }] } },
+    { $set: { products: [{ id: String(product._id), count: 2, price: 4.25 }] } },
+    { runValidators: true },
   );
   const body = {
     cartId: String(cart._id),
+    reviewedItems,
     shipping: { city: 'Tel Aviv', street: 'Ha Masger 10', date: '2099-12-01' },
     payment: { method: 'credit_card', last4: '4242' },
     total: 0.01,
@@ -431,10 +434,22 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
     ).body.success,
     false,
   );
+  const priceChange = await request('/api/orders/checkout', {
+    method: 'POST',
+    cookie: customerCookie,
+    body,
+  });
+  assert.equal(priceChange.body.success, false);
+  assert.equal(priceChange.body.review.products[0].price, product.price);
+  assert.equal(await Order.countDocuments({ cart_id: body.cartId }), 0);
   assert.equal((await Cart.findById(cart._id)).status, 1);
+  const confirmed = {
+    ...body,
+    reviewedItems: [{ ...reviewedItems[0], unitPriceCents: Math.round(product.price * 100) }],
+  };
   const results = await Promise.all(
     Array.from({ length: 5 }, () =>
-      request('/api/orders/checkout', { method: 'POST', cookie: customerCookie, body }),
+      request('/api/orders/checkout', { method: 'POST', cookie: customerCookie, body: confirmed }),
     ),
   );
   assert.ok(results.every((result) => result.body.success));
@@ -455,7 +470,7 @@ test('checkout saves shipping and demo payment once, closes the cart, and surviv
   const repeated = await request('/api/orders/checkout', {
     method: 'POST',
     cookie: customerCookie,
-    body,
+    body: confirmed,
   });
   assert.equal(repeated.body.order.id, String(order._id));
   assert.equal(

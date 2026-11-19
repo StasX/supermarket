@@ -16,6 +16,7 @@ export interface CartItem {
   id: string;
   count: number;
   price: number;
+  name?: string;
 }
 export interface Cart {
   id: string;
@@ -26,7 +27,7 @@ export interface OrderHistory {
   id: string;
   total?: number;
   createdAt?: string;
-  products?: (CartItem & { name?: string })[];
+  products?: CartItem[];
 }
 export interface Result {
   success: boolean;
@@ -39,6 +40,7 @@ export interface SignupAvailability extends Result {
 }
 export interface CheckoutRequest {
   cartId: string;
+  reviewedItems: { id: string; count: number; unitPriceCents: number }[];
   shipping: { city: string; street: string; date: string };
   payment: { method: 'credit_card'; last4: string };
 }

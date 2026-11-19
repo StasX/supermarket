@@ -97,6 +97,7 @@ test('customer can shop, change quantities, reload, review, and sign out', async
         result = { success: true, cart: { id: 'c1', products: cart, createdAt: '2026-01-01' } };
       }
       if (path === 'api/orders/checkout') {
+        expect(body.reviewedItems).toEqual([{ id: product.id, count: 3, unitPriceCents: 1050 }]);
         expect(body.payment).toEqual({ method: 'credit_card', last4: '4242' });
         result = {
           success: true,
